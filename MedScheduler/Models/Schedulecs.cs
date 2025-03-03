@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace MedScheduler.Models
 {
-    internal class Schedule
+    public class Schedule
     {
         public Dictionary<int, List<int>> DoctorToPatients { get; set; } // Doctor ID to list of patient IDs
         public Dictionary<int, int> PatientToDoctor { get; set; } // Patient ID to Doctor ID

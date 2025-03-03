@@ -46,12 +46,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="forms\DataCenter.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="forms\DataCenter.Designer.cs">
-      <DependentUpon>DataCenter.cs</DependentUpon>
-    </Compile>
+    <Compile Include="DataManager.cs" />
     <Compile Include="forms\DoctorForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -80,15 +75,13 @@
     <Compile Include="Models\Doctor.cs" />
     <Compile Include="Models\Patient.cs" />
     <Compile Include="Models\Schedulecs.cs" />
+    <Compile Include="PanelNavigationManager.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="StyleUtils\ModenButton.cs">
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="Test.cs" />
-    <EmbeddedResource Include="forms\DataCenter.resx">
-      <DependentUpon>DataCenter.cs</DependentUpon>
-    </EmbeddedResource>
     <EmbeddedResource Include="forms\MainScreen.resx">
       <DependentUpon>MainScreen.cs</DependentUpon>
     </EmbeddedResource>

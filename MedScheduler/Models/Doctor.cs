@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace MedScheduler.Models
 {
-    internal class Doctor
+    public class Doctor
     {
         public int Id { get; set; }
         public string Specialization { get; set; }
