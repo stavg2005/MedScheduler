@@ -1,4 +1,5 @@
-﻿using MedScheduler.Models;
+﻿using MedScheduler.forms;
+using Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -17,7 +18,7 @@ namespace MedScheduler
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new MainScreen());
+            Application.Run(new MainForm());
 
         }
     }

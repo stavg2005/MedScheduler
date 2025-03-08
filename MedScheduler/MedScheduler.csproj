@@ -46,35 +46,21 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="DataManager.cs" />
     <Compile Include="forms\DoctorForm.cs">
-      <SubType>Form</SubType>
+      <SubType>UserControl</SubType>
     </Compile>
     <Compile Include="forms\DoctorForm.Designer.cs">
       <DependentUpon>DoctorForm.cs</DependentUpon>
     </Compile>
-    <Compile Include="forms\MainScreen.cs">
+    <Compile Include="forms\MainForm.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="forms\MainScreen.Designer.cs">
-      <DependentUpon>MainScreen.cs</DependentUpon>
+    <Compile Include="forms\MainForm.Designer.cs">
+      <DependentUpon>MainForm.cs</DependentUpon>
     </Compile>
-    <Compile Include="forms\PatientForm.cs">
-      <SubType>Form</SubType>
+    <Compile Include="Models\ModernButton.cs">
+      <SubType>Component</SubType>
     </Compile>
-    <Compile Include="forms\PatientForm.Designer.cs">
-      <DependentUpon>PatientForm.cs</DependentUpon>
-    </Compile>
-    <Compile Include="forms\ScheduleResults.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="forms\ScheduleResults.Designer.cs">
-      <DependentUpon>ScheduleResults.cs</DependentUpon>
-    </Compile>
-    <Compile Include="Genetics.cs" />
-    <Compile Include="Models\Doctor.cs" />
-    <Compile Include="Models\Patient.cs" />
-    <Compile Include="Models\Schedulecs.cs" />
     <Compile Include="PanelNavigationManager.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
@@ -82,8 +68,11 @@
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="Test.cs" />
-    <EmbeddedResource Include="forms\MainScreen.resx">
-      <DependentUpon>MainScreen.cs</DependentUpon>
+    <EmbeddedResource Include="forms\DoctorForm.resx">
+      <DependentUpon>DoctorForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="forms\MainForm.resx">
+      <DependentUpon>MainForm.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Properties\Resources.resx">
       <Generator>ResXFileCodeGenerator</Generator>
@@ -119,6 +108,16 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="Resources\patient.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ClassLibrary1\Model.csproj">
+      <Project>{fa7b23e6-06c1-43b0-bb7b-2436db55c0cc}</Project>
+      <Name>Model</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\DB\DB.csproj">
+      <Project>{09b770fa-a0db-4a2c-beea-6e474e7e4b2a}</Project>
+      <Name>DB</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
