@@ -18,7 +18,12 @@ namespace MedScheduler.forms
         // Dashboard is already there from your code
         private DoctorsForm doctorsForm;
 
+
+        // Dashboard is already there from your code
+        private SchedulesForm schedulesForm =new SchedulesForm();
+
         DataManager db = new DataManager();
+
 
         public MainForm()
         {
@@ -184,23 +189,23 @@ namespace MedScheduler.forms
                     doctorsForm.BringToFront();
                     break;
                 case 2: // Patients
-                    // Add Patients page when implemented
+                        // Add Patients page when implemented
                     ShowPlaceholderPage("Patients");
                     break;
                 case 3: // Surgeries
-                    // Add Surgeries page when implemented
+                        // Add Surgeries page when implemented
                     ShowPlaceholderPage("Surgeries");
                     break;
                 case 4: // Schedules
-                    // Add Schedules page when implemented
-                    ShowPlaceholderPage("Schedules");
+                    contentPanel.Controls.Add(schedulesForm);
+                    schedulesForm.BringToFront();
                     break;
                 case 5: // Reports
-                    // Add Reports page when implemented
+                        // Add Reports page when implemented
                     ShowPlaceholderPage("Reports");
                     break;
                 case 6: // Settings
-                    // Add Settings page when implemented
+                        // Add Settings page when implemented
                     ShowPlaceholderPage("Settings");
                     break;
             }
