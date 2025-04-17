@@ -3,6 +3,9 @@ using System.Drawing;
 using System.Windows.Forms;
 using System.Drawing.Drawing2D;
 using Models;
+using System.Linq;
+using System.Collections.Generic;
+using DB;
 
 namespace MedScheduler.forms
 {
@@ -16,21 +19,32 @@ namespace MedScheduler.forms
         private Panel currentlyActiveNavItem;
 
         // Dashboard is already there from your code
-        private DoctorsForm doctorsForm;
+        public static DoctorsForm doctorsForm;
 
+        private GeneticAlgorithmPanel geneticAlgorithmPanel;
 
         // Dashboard is already there from your code
-        private SchedulesForm schedulesForm =new SchedulesForm();
-
-        DataManager db = new DataManager();
-
-
+            public static SchedulesForm schedulesForm;
+            public static SchedulerOrchestrator s;
+        public static assignment assignments;
+        public DataManager db = new DataManager();
+        public static Schedule main = new Schedule();
+        
         public MainForm()
         {
-            // First let the designer initialize any components it has generated
-            InitializeComponent();
+            DataSingelton.Instance.LoadDataFromDatabase(db);
+            // First create the orchestrator and generate the schedule
+           
+            s = new SchedulerOrchestrator();
+            
+            
 
-            // Then call our custom initialization
+            geneticAlgorithmPanel = new GeneticAlgorithmPanel
+            {
+                Dock = DockStyle.Fill
+            };
+            // The rest of your initialization
+            InitializeComponent();
             InitializeCustomComponents();
 
             this.Text = "MedScheduler";
@@ -40,7 +54,7 @@ namespace MedScheduler.forms
 
         private void MainForm_Load(object sender, EventArgs e)
         {
-
+            
         }
 
         private void InitializeCustomComponents()
@@ -106,7 +120,7 @@ namespace MedScheduler.forms
             doctorsForm = new DoctorsForm();
 
             // Create navigation items
-            string[] navItems = { "Dashboard", "Doctors", "Patients", "Surgeries", "Schedules", "Reports", "Settings" };
+            string[] navItems = { "Dashboard", "Doctors", "Patients", "Surgeries", "Schedules", "Reports", "Settings","Algorithm","Assingments" };
             for (int i = 0; i < navItems.Length; i++)
             {
                 Panel navItemPanel = new Panel
@@ -197,16 +211,31 @@ namespace MedScheduler.forms
                     ShowPlaceholderPage("Surgeries");
                     break;
                 case 4: // Schedules
-                    contentPanel.Controls.Add(schedulesForm);
-                    schedulesForm.BringToFront();
+                    if(schedulesForm != null)
+                    {
+                        contentPanel.Controls.Add(schedulesForm);
+                        schedulesForm.BringToFront();
+                    }
+ 
                     break;
                 case 5: // Reports
-                        // Add Reports page when implemented
-                    ShowPlaceholderPage("Reports");
+                    if (assignments != null)
+                    {
+                        contentPanel.Controls.Add(assignments);
+                        assignments.BringToFront();
+                    }
+
+                        ShowPlaceholderPage("DoctorForm");
+                    
                     break;
                 case 6: // Settings
                         // Add Settings page when implemented
                     ShowPlaceholderPage("Settings");
+                    break;
+                case 7:
+                    
+                    contentPanel.Controls.Add(geneticAlgorithmPanel);
+                    geneticAlgorithmPanel.BringToFront();
                     break;
             }
         }
@@ -268,7 +297,7 @@ namespace MedScheduler.forms
             // Stats Cards
             CreateStatsCard(dashboardPanel, 20, 60, "Total Doctors", doctors.Count.ToString(), "👨‍⚕️", "#3498DB");
             CreateStatsCard(dashboardPanel, 280, 60, "Total Patients", patients.Count.ToString(), "🤒", "#E74C3C");
-            CreateStatsCard(dashboardPanel, 540, 60, "Scheduled Surgeries", "12", "🔪", "#2ECC71");
+            CreateStatsCard(dashboardPanel, 540, 60, "Scheduled Surgeries",s.totalSurgeries.ToString(), "🔪", "#2ECC71");
 
             // Today's Schedule Panel
             Panel schedulePanel = CreatePanel(dashboardPanel, 20, 200, 760, 200, "Today's Schedule");
@@ -350,12 +379,13 @@ namespace MedScheduler.forms
             // Schedule Metrics Panel
             Panel metricsPanel = CreatePanel(dashboardPanel, 410, 420, 370, 200, "Schedule Metrics");
 
+
             string[] metrics = {
-                "Specialization Match Rate:", "98%", "#2ECC71",
-                "Average Doctor Workload:", "85%", "#3498DB",
-                "Patients Assigned:", "98/100", "#2C3E50",
-                "Urgent Cases Priority:", "100%", "#2ECC71"
-            };
+    "Specialization Match Rate:", $"{s.stat.specializationMatchRate:F1}%", "#2ECC71",
+    "Average Doctor Workload:", $"{s.stat.AvarageDoctorWorkLoad:F1}%", "#3498DB",
+    "Patients Assigned:", $"{s.stat.assignmentPercentage}%", "#2C3E50",
+    "Urgent Cases Priority:", $"{s.stat.UrgentCasesPriority:F1}%", "#2ECC71"
+};
 
             for (int i = 0; i < 4; i++)
             {
@@ -532,6 +562,7 @@ namespace MedScheduler.forms
 
             parent.Controls.Add(rowPanel);
         }
+
 
         private void contentPanel_Paint(object sender, PaintEventArgs e)
         {

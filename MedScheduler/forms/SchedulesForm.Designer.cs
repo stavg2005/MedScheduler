@@ -170,6 +170,7 @@
             this.calendarPanel.Name = "calendarPanel";
             this.calendarPanel.Size = new System.Drawing.Size(1139, 753);
             this.calendarPanel.TabIndex = 2;
+            this.calendarPanel.Paint += new System.Windows.Forms.PaintEventHandler(this.calendarPanel_Paint);
             // 
             // SchedulesForm
             // 

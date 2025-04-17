@@ -10,7 +10,7 @@ namespace MedScheduler
     internal class Test
     {
 
-            static void Main1(string[] args)
+            static async void Main1(string[] args)
             {
                 var doctors = new List<Doctor>
         {
@@ -26,8 +26,8 @@ namespace MedScheduler
             new Patient { Id = 3, Condition = "Migraine", Urgency = "Low", RequiredSpecialization = "Neurology" }
         };
 
-                var genetics = new Genetics(100, doctors, patients);
-                var bestSchedule = genetics.Solve();
+                var genetics = new DoctorScheduler(100, doctors, patients);
+                var bestSchedule =  genetics.Solve();
 
                 // Output the best schedule
                 foreach (var doctorId in bestSchedule.DoctorToPatients.Keys)

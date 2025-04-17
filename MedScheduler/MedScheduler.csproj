@@ -46,11 +46,23 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="forms\assignments.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="forms\assignments.Designer.cs">
+      <DependentUpon>assignments.cs</DependentUpon>
+    </Compile>
     <Compile Include="forms\DoctorForm.cs">
       <SubType>UserControl</SubType>
     </Compile>
     <Compile Include="forms\DoctorForm.Designer.cs">
       <DependentUpon>DoctorForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="forms\GeneticAlgorithmPanel.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="forms\GeneticAlgorithmPanel.Designer.cs">
+      <DependentUpon>GeneticAlgorithmPanel.cs</DependentUpon>
     </Compile>
     <Compile Include="forms\MainForm.cs">
       <SubType>Form</SubType>
@@ -74,8 +86,14 @@
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="Test.cs" />
+    <EmbeddedResource Include="forms\assignments.resx">
+      <DependentUpon>assignments.cs</DependentUpon>
+    </EmbeddedResource>
     <EmbeddedResource Include="forms\DoctorForm.resx">
       <DependentUpon>DoctorForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="forms\GeneticAlgorithmPanel.resx">
+      <DependentUpon>GeneticAlgorithmPanel.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="forms\MainForm.resx">
       <DependentUpon>MainForm.cs</DependentUpon>
