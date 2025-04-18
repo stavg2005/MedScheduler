@@ -1,89 +1,271 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using Models;
+using ClassLibrary1;
+using Models; // Assuming all models are here
 
-namespace MedScheduler
+namespace MedScheduler // Or your appropriate namespace
 {
     public class DataGenerator
     {
         private Random random = new Random();
 
-        // Lists for random data generation
-        private List<string> firstNames = new List<string> {
-            "John", "Sarah", "Michael", "Emma", "David", "Jennifer", "Robert", "Emily",
-            "William", "Olivia", "James", "Sophia", "Benjamin", "Ava", "Daniel", "Isabella",
-            "Matthew", "Mia", "Joseph", "Charlotte", "Andrew", "Amelia", "Samuel", "Harper",
-            "Anthony", "Abigail", "Christopher", "Elizabeth", "Ryan", "Sofia", "Nathan", "Ella"
+        // --- Base Data for Correlation ---
+
+        // Define some specializations, separating surgical ones
+        private List<string> medicalSpecializations = new List<string> {
+            "Cardiology", "Neurology", "Pediatrics", "Dermatology", "Oncology",
+            "Pulmonology", "Gastroenterology", "Endocrinology", "Rheumatology",
+            "Psychiatry", "Nephrology", "Geriatrics", "Infectious Disease", "Hematology"
+        };
+        private List<string> surgicalSpecializations = new List<string> {
+            "General Surgery", "Orthopedics", "Neurosurgery", "Ophthalmology", "Urology", "OB/GYN", "Cardiac Surgery" // Added Cardiac
+        };
+        private List<string> allSpecializations => medicalSpecializations.Concat(surgicalSpecializations).ToList();
+
+        // Define sample procedures mapped to specializations
+        private Dictionary<string, List<string>> proceduresBySpecialization = new Dictionary<string, List<string>> {
+            { "General Surgery", new List<string> { "Appendectomy", "Hernia Repair", "Cholecystectomy" } },
+            { "Orthopedics", new List<string> { "Hip Replacement", "Knee Replacement", "ACL Reconstruction", "Rotator Cuff Repair" } },
+            { "Neurosurgery", new List<string> { "Spinal Fusion", "Craniotomy" } },
+            { "Ophthalmology", new List<string> { "Cataract Surgery" } },
+            { "Urology", new List<string> { "Kidney Stone Removal (Lithotripsy)", "Prostatectomy" } },
+            { "OB/GYN", new List<string> { "Hysterectomy", "Cesarean Section" } },
+            { "Cardiac Surgery", new List<string> { "Coronary Artery Bypass Graft (CABG)", "Valve Replacement" } },
+            { "Cardiology", new List<string> { "Angioplasty", "Stent Placement", "Cardiac Catheterization", "Pacemaker Implantation" } }, // Some non-surgical
+            { "Gastroenterology", new List<string> { "Colonoscopy", "Endoscopy (EGD)" } },
+            { "Oncology", new List<string> { "Biopsy", "Lumpectomy", "Chemotherapy Administration" } }
+            // Add more mappings...
         };
 
-        private List<string> lastNames = new List<string> {
-            "Smith", "Johnson", "Williams", "Jones", "Brown", "Davis", "Miller", "Wilson",
-            "Moore", "Taylor", "Anderson", "Thomas", "Jackson", "White", "Harris", "Martin",
-            "Thompson", "Garcia", "Martinez", "Robinson", "Clark", "Rodriguez", "Lewis", "Lee",
-            "Walker", "Hall", "Allen", "Young", "Hernandez", "King", "Wright", "Lopez"
+        // Define sample equipment needs (can be more granular)
+        private Dictionary<string, List<string>> equipmentBySpecialization = new Dictionary<string, List<string>> {
+            { "General Surgery", new List<string> { "Surgical Laser", "Endoscope", "Vital Signs Monitor", "Anesthesia Machine" } },
+            { "Orthopedics", new List<string> { "X-Ray Machine", "Surgical Microscope", "Vital Signs Monitor", "Anesthesia Machine" } },
+            { "Cardiac Surgery", new List<string> { "Heart-Lung Machine", "EKG Machine", "Defibrillator", "Vital Signs Monitor", "Anesthesia Machine" } },
+            { "Cardiology", new List<string> { "EKG Machine", "Angiography Suite", "Ultrasound" } },
+            { "Radiology", new List<string> { "X-Ray Machine", "MRI Scanner", "CT Scanner", "Ultrasound" } } // Example non-scheduling spec
+            // Add more mappings...
         };
-
-        private List<string> specializations = new List<string> {
-            "Cardiology", "Neurology", "Orthopedics", "Pediatrics", "Dermatology", "Oncology",
-            "Emergency Medicine", "Pulmonology", "Gastroenterology", "Endocrinology",
-            "Rheumatology", "Ophthalmology", "Psychiatry", "Urology", "Nephrology",
-            "Geriatrics", "Infectious Disease", "Hematology", "OB/GYN", "General Surgery"
-        };
-
-        private List<string> conditions = new List<string> {
-            "Heart Disease", "Migraine", "Broken Leg", "Pneumonia", "Eczema", "Lung Cancer",
-            "Chest Pain", "COPD", "Ulcerative Colitis", "Type 1 Diabetes", "Rheumatoid Arthritis",
-            "Cataracts", "Depression", "Kidney Stones", "Chronic Kidney Disease", "Dementia",
-            "HIV", "Anemia", "Pregnancy Complications", "Appendicitis"
-        };
-
-        private List<string> urgencies = new List<string> { "High", "Medium", "Low" };
-
-        private List<string> equipments = new List<string> {
+        private List<string> basicOrEquipment = new List<string> { "Vital Signs Monitor", "Anesthesia Machine", "Defibrillator" };
+        private List<string> allEquipment = new List<string> {
             "X-Ray Machine", "MRI Scanner", "CT Scanner", "Ultrasound", "EKG Machine",
             "Anesthesia Machine", "Vital Signs Monitor", "Defibrillator", "Ventilator",
-            "Surgical Laser", "Endoscope", "Surgical Microscope", "Dialysis Machine"
+            "Surgical Laser", "Endoscope", "Surgical Microscope", "Dialysis Machine",
+            "Heart-Lung Machine", "Angiography Suite", "Laparoscopic Tower"
         };
 
-        public List<Doctor> GenerateDoctors(int count)
+
+        // Keep names lists
+        private List<string> firstNames = new List<string> { "John", "Sarah", "Michael", "Emma", "David", "Jennifer", "Robert", "Emily", "William", "Olivia", "James", "Sophia", "Benjamin", "Ava", "Daniel", "Isabella", "Matthew", "Mia", "Joseph", "Charlotte", "Andrew", "Amelia", "Samuel", "Harper", "Anthony", "Abigail", "Christopher", "Elizabeth", "Ryan", "Sofia", "Nathan", "Ella" };
+        private List<string> lastNames = new List<string> { "Smith", "Johnson", "Williams", "Jones", "Brown", "Davis", "Miller", "Wilson", "Moore", "Taylor", "Anderson", "Thomas", "Jackson", "White", "Harris", "Martin", "Thompson", "Garcia", "Martinez", "Robinson", "Clark", "Rodriguez", "Lewis", "Lee", "Walker", "Hall", "Allen", "Young", "Hernandez", "King", "Wright", "Lopez" };
+        private List<string> conditions = new List<string> { "Heart Disease", "Migraine", "Broken Leg", "Pneumonia", "Eczema", "Lung Cancer", "Chest Pain", "COPD", "Ulcerative Colitis", "Type 1 Diabetes", "Rheumatoid Arthritis", "Cataracts", "Depression", "Kidney Stones", "Chronic Kidney Disease", "Dementia", "HIV", "Anemia", "Pregnancy Complications", "Appendicitis", "Gallstones", "ACL Tear" };
+
+
+        // --- Enhanced Generation Methods ---
+
+        /// <summary>
+        /// Generates Procedures first, ensuring they align with defined specializations.
+        /// </summary>
+        public List<MedicalProcedure> GenerateProcedures(int count)
         {
-            List<Doctor> doctors = new List<Doctor>();
+            List<MedicalProcedure> procedures = new List<MedicalProcedure>();
+            List<string> availableSpecs = proceduresBySpecialization.Keys.ToList();
 
             for (int i = 1; i <= count; i++)
             {
-                string specialization = specializations[random.Next(specializations.Count)];
-                int maxWorkload = random.Next(5, 16); // Random workload between 5-15
-                int experienceLevel = random.Next(1, 4); // 1-Junior, 2-Regular, 3-Senior
+                // Pick a specialization that has defined procedures
+                string specialization = availableSpecs[random.Next(availableSpecs.Count)];
+                string procedureName = proceduresBySpecialization[specialization][random.Next(proceduresBySpecialization[specialization].Count)];
+                bool isOperation = surgicalSpecializations.Contains(specialization); // Assume surgical specs mean operation
+                int complexityLevelInt = random.Next(1, 4);
+                ExperienceLevel minExperience = (ExperienceLevel)complexityLevelInt; // Simple mapping: 1->Junior, 2->Regular, 3->Senior
 
-                Doctor doctor = new Doctor
+                // Get relevant equipment
+                List<string> requiredEquipment = new List<string>();
+                if (equipmentBySpecialization.TryGetValue(specialization, out var specEquip))
+                {
+                    // Take a subset of the typical equipment for this spec
+                    int equipCount = random.Next(1, specEquip.Count + 1);
+                    requiredEquipment.AddRange(specEquip.OrderBy(x => random.Next()).Take(equipCount));
+                }
+
+                MedicalProcedure procedure = new MedicalProcedure
                 {
                     Id = i,
+                    Name = procedureName,
+                    RequiredSpecialization = specialization,
+                    EstimatedDuration = random.Next(1, 5) + Math.Round(random.NextDouble(), 1),
+                    IsOperation = isOperation,
+                    ComplexityLevel = complexityLevelInt,
+                    MinimumDoctorExperienceLevel = minExperience,
+                    RequiredEquipment = requiredEquipment.Distinct().ToList() // Ensure unique
+                };
+                procedures.Add(procedure);
+            }
+            Console.WriteLine($"Generated {procedures.Count} procedures.");
+            return procedures;
+        }
+
+        /// <summary>
+        /// Generates Doctors and Surgeons, ensuring coverage for specializations.
+        /// </summary>
+        public List<Doctor> GenerateDoctors(int count, List<MedicalProcedure> procedures)
+        {
+            List<Doctor> doctors = new List<Doctor>();
+            var specsWithProcedures = procedures.Select(p => p.RequiredSpecialization).Distinct().ToList();
+            var specsRequiringSurgery = procedures.Where(p => p.IsOperation).Select(p => p.RequiredSpecialization).Distinct().ToList();
+            int currentId = 1;
+
+            // Ensure at least a few doctors per specialization that has procedures
+            foreach (string spec in specsWithProcedures)
+            {
+                int numDoctorsForSpec = random.Next(2, 6); // Generate 2-5 doctors per needed spec
+                for (int i = 0; i < numDoctorsForSpec; i++)
+                {
+                    if (currentId > count) break; // Stop if we reach the total count
+
+                    bool isSurgicalSpec = specsRequiringSurgery.Contains(spec);
+                    // Higher chance of being a surgeon if it's a surgical spec
+                    bool makeSurgeon = isSurgicalSpec && random.Next(100) < 70;
+
+                    Doctor doc = CreateDoctorOrSurgeon(currentId++, spec, makeSurgeon);
+                    doctors.Add(doc);
+                }
+                if (currentId > count) break;
+            }
+
+            // Fill remaining count with random specializations
+            while (currentId <= count)
+            {
+                string spec = allSpecializations[random.Next(allSpecializations.Count)];
+                bool isSurgicalSpec = surgicalSpecializations.Contains(spec);
+                bool makeSurgeon = isSurgicalSpec && random.Next(100) < 25; // Lower chance for random specs
+                Doctor doc = CreateDoctorOrSurgeon(currentId++, spec, makeSurgeon);
+                doctors.Add(doc);
+            }
+
+            Console.WriteLine($"Generated {doctors.Count} doctors/surgeons.");
+            return doctors;
+        }
+
+        // Helper to create individual doctor/surgeon
+        private Doctor CreateDoctorOrSurgeon(int id, string specialization, bool isSurgeon)
+        {
+            int maxWorkload = random.Next(5, 16);
+            ExperienceLevel experienceLevel = (ExperienceLevel)random.Next(1, 4);
+
+            if (isSurgeon)
+            {
+                return new Surgeon
+                {
+                    Id = id,
+                    Name = $"Dr. {firstNames[random.Next(firstNames.Count)]} {lastNames[random.Next(lastNames.Count)]} (Surgeon)",
+                    Specialization = specialization,
+                    Workload = 0,
+                    MaxWorkload = maxWorkload,
+                    ExperienceLevel = experienceLevel,
+                    Preferences = GenerateDoctorPreferences(id, conditions), // Pass conditions list
+                    IsAvailableForSurgery = random.Next(100) < 85,
+                    Availability = GenerateRealisticAvailabilitySlots() // Use realistic slots
+                };
+            }
+            else
+            {
+                return new Doctor
+                {
+                    Id = id,
                     Name = $"Dr. {firstNames[random.Next(firstNames.Count)]} {lastNames[random.Next(lastNames.Count)]}",
                     Specialization = specialization,
                     Workload = 0,
                     MaxWorkload = maxWorkload,
                     ExperienceLevel = experienceLevel,
-                    Preferences = GenerateRandomPreferences()
+                    Preferences = GenerateDoctorPreferences(id, conditions) // Pass conditions list
                 };
-
-                doctors.Add(doctor);
             }
-
-            return doctors;
         }
 
-        public List<Patient> GeneratePatients(int count, List<Doctor> doctors)
+        /// <summary>
+        /// Generates Operating Rooms, ensuring some match surgical specializations.
+        /// </summary>
+        public List<OperatingRoom> GenerateOperatingRooms(int count, List<MedicalProcedure> procedures)
+        {
+            List<OperatingRoom> operatingRooms = new List<OperatingRoom>();
+            var requiredSurgicalSpecs = procedures.Where(p => p.IsOperation).Select(p => p.RequiredSpecialization).Distinct().ToList();
+            int currentId = 1;
+
+            // Create at least one OR per required surgical specialization
+            foreach (string spec in requiredSurgicalSpecs)
+            {
+                if (currentId > count) break;
+                operatingRooms.Add(CreateOperatingRoom(currentId++, true, spec));
+            }
+
+            // Fill the rest with general or randomly specialized rooms
+            while (currentId <= count)
+            {
+                bool isSpecialized = random.Next(100) < 30; // Lower chance for remaining ORs
+                string spec = isSpecialized ? surgicalSpecializations[random.Next(surgicalSpecializations.Count)] : null;
+                operatingRooms.Add(CreateOperatingRoom(currentId++, isSpecialized, spec));
+            }
+            Console.WriteLine($"Generated {operatingRooms.Count} operating rooms.");
+            return operatingRooms;
+        }
+
+        // Helper to create an operating room
+        private OperatingRoom CreateOperatingRoom(int id, bool isSpecialized, string specialization)
+        {
+            // Start with basic equipment
+            List<string> equipment = new List<string>(basicOrEquipment);
+            // Add specialized equipment
+            if (isSpecialized && !string.IsNullOrEmpty(specialization) && equipmentBySpecialization.TryGetValue(specialization, out var specEquip))
+            {
+                equipment.AddRange(specEquip);
+            }
+            // Add a few extra random pieces
+            equipment.AddRange(GenerateRandomEquipment(random.Next(1, 4)));
+
+            return new OperatingRoom
+            {
+                Id = id,
+                Name = $"OR-{id:D2}" + (isSpecialized ? $" ({specialization})" : " (General)"),
+                IsSpecialized = isSpecialized,
+                Specialization = specialization,
+                AvailableEquipment = equipment.Distinct().ToList(), // Ensure unique
+                AvailabilityHours = GenerateRealisticORAvailability(), // Use realistic TimeRange
+                ScheduledSlots = new List<TimeSlot>()
+            };
+        }
+
+        /// <summary>
+        /// Generates Patients, linking them to existing specializations and procedures.
+        /// </summary>
+        public List<Patient> GeneratePatients(int count, List<Doctor> doctors, List<MedicalProcedure> procedures)
         {
             List<Patient> patients = new List<Patient>();
+            var availableSpecializations = doctors.Select(d => d.Specialization).Distinct().ToList();
+            var proceduresLookup = procedures.ToLookup(p => p.RequiredSpecialization); // Group procedures by spec
 
             for (int i = 1; i <= count; i++)
             {
-                string specialization = specializations[random.Next(specializations.Count)];
-                string condition = conditions[random.Next(conditions.Count)];
-                string urgency = urgencies[random.Next(urgencies.Count)];
-                bool needsSurgery = random.Next(100) < 30; // 30% chance to need surgery
-                int complexityLevel = random.Next(1, 4); // 1-Simple, 2-Moderate, 3-Complex
+                // Assign specialization based on available doctors
+                string specialization = availableSpecializations[random.Next(availableSpecializations.Count)];
+                string condition = conditions[random.Next(conditions.Count)]; // Could correlate condition to spec later
+                UrgencyLevel urgency = (UrgencyLevel)random.Next(1, 4);
+                ComplexityLevel complexity = (ComplexityLevel)random.Next(1, 4);
+                bool needsSurgery = surgicalSpecializations.Contains(specialization) && random.Next(100) < 40; // 40% chance if surgical spec
+
+                int? requiredProcedureId = null;
+                if (needsSurgery && proceduresLookup.Contains(specialization) && proceduresLookup[specialization].Any(p => p.IsOperation))
+                {
+                    // Select a surgery procedure matching the specialization
+                    var possibleProcedures = proceduresLookup[specialization].Where(p => p.IsOperation).ToList();
+                    requiredProcedureId = possibleProcedures[random.Next(possibleProcedures.Count)].Id;
+                }
+                else
+                {
+                    needsSurgery = false; // Can't need surgery if no matching procedure exists or not surgical spec
+                }
 
                 Patient patient = new Patient
                 {
@@ -93,201 +275,124 @@ namespace MedScheduler
                     Urgency = urgency,
                     RequiredSpecialization = specialization,
                     NeedsSurgery = needsSurgery,
-                    AdmissionDate = DateTime.Now.AddDays(-random.Next(0, 10)),
-                    ComplexityLevel = complexityLevel,
-                    EstimatedTreatmentTime = random.Next(1, 5) + random.NextDouble() // 1-5 hours with decimal
+                    AdmissionDate = DateTime.Now.AddDays(-random.Next(1, 20)), // Admitted in last 20 days
+                    ComplexityLevel = complexity,
+                    EstimatedTreatmentTime = needsSurgery && requiredProcedureId.HasValue ?
+                                             procedures.First(p => p.Id == requiredProcedureId.Value).EstimatedDuration : // Use procedure duration
+                                             random.Next(1, 3) + random.NextDouble(), // Shorter time for non-surgery
+                    RequiredProcedureId = requiredProcedureId,
+                    ScheduledSurgeryDate = null,
+                    AssignedDoctorId = null,
+                    AssignedSurgeonId = null,
+                    AssignedOperatingRoomId = null,
+                    PreviousDoctors = new List<int>()
                 };
 
-                // Add previous doctors for some patients (continuity of care)
-                if (random.Next(100) < 40) // 40% chance
+                // Assign previous doctors logically
+                if (doctors.Any() && random.Next(100) < 30) // 30% chance
                 {
-                    int previousDoctorCount = random.Next(1, 3);
-                    for (int j = 0; j < previousDoctorCount; j++)
+                    var potentialPrevDoctors = doctors.Where(d => d.Specialization == patient.RequiredSpecialization).ToList();
+                    if (potentialPrevDoctors.Any())
                     {
-                        var doctor = doctors.Where(d => d.Specialization == patient.RequiredSpecialization)
-                                           .Skip(random.Next(doctors.Count(d => d.Specialization == patient.RequiredSpecialization)))
-                                           .FirstOrDefault();
-                        if (doctor != null && !patient.PreviousDoctors.Contains(doctor.Id))
-                        {
-                            patient.PreviousDoctors.Add(doctor.Id);
-                        }
+                        patient.PreviousDoctors.Add(potentialPrevDoctors[random.Next(potentialPrevDoctors.Count)].Id);
                     }
                 }
-
                 patients.Add(patient);
             }
-
+            Console.WriteLine($"Generated {patients.Count} patients.");
             return patients;
         }
 
-        public List<MedicalProcedure> GenerateProcedures(int count)
-        {
-            List<MedicalProcedure> procedures = new List<MedicalProcedure>();
-            List<string> procedureNames = new List<string>
-            {
-                "Appendectomy", "Coronary Bypass", "Hip Replacement", "Cataract Surgery",
-                "Hernia Repair", "Cholecystectomy", "Hysterectomy", "Mastectomy", "Biopsy",
-                "Angioplasty", "Colonoscopy", "Endoscopy", "Tonsillectomy", "Cesarean Section"
-            };
 
-            for (int i = 1; i <= count; i++)
-            {
-                string specialization = specializations[random.Next(specializations.Count)];
-                bool isOperation = random.Next(100) < 70; // 70% chance of being an operation
-                int complexityLevel = random.Next(1, 4); // 1-Simple, 2-Moderate, 3-Complex
-
-                MedicalProcedure procedure = new MedicalProcedure
-                {
-                    Id = i,
-                    Name = procedureNames[random.Next(procedureNames.Count)],
-                    RequiredSpecialization = specialization,
-                    EstimatedDuration = random.Next(1, 5) + random.NextDouble(), // 1-5 hours with decimal
-                    IsOperation = isOperation,
-                    ComplexityLevel = complexityLevel,
-                    MinimumDoctorExperienceLevel = complexityLevel,
-                    RequiredEquipment = GenerateRandomEquipment(random.Next(1, 4))
-                };
-
-                procedures.Add(procedure);
-            }
-
-            return procedures;
-        }
-
-        public List<OperatingRoom> GenerateOperatingRooms(int count)
-        {
-            List<OperatingRoom> operatingRooms = new List<OperatingRoom>();
-
-            for (int i = 1; i <= count; i++)
-            {
-                bool isSpecialized = random.Next(100) < 40; // 40% chance of specialized rooms
-                string specialization = isSpecialized ?
-                    specializations[random.Next(specializations.Count)] : null;
-
-                OperatingRoom operatingRoom = new OperatingRoom
-                {
-                    Id = i,
-                    Name = $"OR-{i:D2}",
-                    IsSpecialized = isSpecialized,
-                    Specialization = specialization,
-                    AvailableEquipment = GenerateRandomEquipment(random.Next(5, 10)),
-                    AvailabilityHours = GenerateAvailabilityHours()
-                };
-
-                operatingRooms.Add(operatingRoom);
-            }
-
-            return operatingRooms;
-        }
-
-        public Schedule GenerateInitialSchedule(List<Doctor> doctors, List<Patient> patients)
-        {
-            Schedule schedule = new Schedule();
-
-            // Assign some patients to doctors
-            foreach (var patient in patients)
-            {
-                // Find doctors with matching specialization and available capacity
-                var availableDoctors = doctors
-                    .Where(d => d.Specialization == patient.RequiredSpecialization && d.CanAcceptPatient())
-                    .ToList();
-
-                if (availableDoctors.Any())
-                {
-                    // Randomly select a doctor
-                    var doctor = availableDoctors[random.Next(availableDoctors.Count)];
-
-                    // Assign patient to doctor
-                    schedule.AssignPatientToDoctor(patient.Id, doctor.Id);
-
-                    // Update doctor's workload
-                    doctor.Workload++;
-                }
-            }
-
-            return schedule;
-        }
-
-        private List<string> GenerateRandomPreferences()
-        {
-            List<string> preferences = new List<string>();
-            int preferencesCount = random.Next(0, 4); // 0-3 preferences
-
-            var preferenceItems = new List<string> {
-                "Prefers complex cases", "Prefers elder patients", "Prefers children",
-                "Prefers short procedures", "Prefers non-critical cases", "Prefers morning shifts",
-                "Prefers afternoon shifts", "Willing to handle emergencies"
-            };
-
-            // Select random preferences without duplicates
-            for (int i = 0; i < preferencesCount; i++)
-            {
-                string preference = preferenceItems[random.Next(preferenceItems.Count)];
-                if (!preferences.Contains(preference))
-                {
-                    preferences.Add(preference);
-                }
-            }
-
-            return preferences;
-        }
+        // --- Updated Helper Methods ---
 
         private List<string> GenerateRandomEquipment(int count)
         {
-            List<string> selectedEquipment = new List<string>();
-
-            // Ensure no duplicates in equipment
-            var shuffledEquipment = equipments.OrderBy(_ => random.Next()).ToList();
-
-            for (int i = 0; i < Math.Min(count, shuffledEquipment.Count); i++)
-            {
-                selectedEquipment.Add(shuffledEquipment[i]);
-            }
-
-            return selectedEquipment;
+            return allEquipment.OrderBy(_ => random.Next()).Take(count).ToList();
         }
 
-        private Dictionary<DayOfWeek, List<TimeSpan>> GenerateAvailabilityHours()
+        // Generates structured preferences for a doctor
+        private List<DoctorPreference> GenerateDoctorPreferences(int doctorId, List<string> availableConditions)
         {
-            var availability = new Dictionary<DayOfWeek, List<TimeSpan>>();
+            List<DoctorPreference> preferences = new List<DoctorPreference>();
+            int preferencesCount = random.Next(0, 3); // 0, 1, or 2 preferences
+            var possibleTypes = Enum.GetValues(typeof(PreferenceType)).Cast<PreferenceType>().ToList();
 
-            // Generate availability for weekdays (Monday-Friday)
-            foreach (DayOfWeek day in Enum.GetValues(typeof(DayOfWeek)))
+            for (int i = 0; i < preferencesCount; i++)
             {
-                if (day != DayOfWeek.Saturday && day != DayOfWeek.Sunday)
-                {
-                    availability[day] = new List<TimeSpan>();
+                var pref = new DoctorPreference { DoctorId = doctorId };
+                pref.Type = possibleTypes[random.Next(possibleTypes.Count)];
+                pref.Direction = (random.Next(2) == 0) ? PreferenceDirection.Prefers : PreferenceDirection.Avoids;
 
-                    // Operating rooms typically available 8AM-8PM
-                    for (int hour = 8; hour < 20; hour += 2) // 2-hour blocks
-                    {
-                        // 80% chance of availability for each block
-                        if (random.Next(100) < 80)
-                        {
-                            availability[day].Add(new TimeSpan(hour, 0, 0));
-                        }
-                    }
+                switch (pref.Type)
+                {
+                    case PreferenceType.PatientComplexity:
+                        pref.LevelValue = random.Next(1, 4); break;
+                    case PreferenceType.PatientUrgency:
+                        pref.LevelValue = random.Next(1, 4); break;
+                    case PreferenceType.PatientCondition:
+                        if (availableConditions.Any()) { pref.ConditionValue = availableConditions[random.Next(availableConditions.Count)]; pref.LevelValue = null; }
+                        else continue; // Skip if no conditions
+                        break;
                 }
-                else
-                {
-                    // Limited weekend availability (10AM-4PM)
-                    // Only add if random check passes (30% chance of weekend availability)
-                    if (random.Next(100) < 30)
-                    {
-                        availability[day] = new List<TimeSpan>();
+                if (!preferences.Any(p => p.Type == pref.Type)) preferences.Add(pref); // Avoid duplicate types
+            }
+            return preferences;
+        }
 
-                        for (int hour = 10; hour < 16; hour += 2)
+        // Generates more realistic availability slots for surgeons
+        private List<AvailabilitySlot> GenerateRealisticAvailabilitySlots()
+        {
+            var availability = new List<AvailabilitySlot>();
+            // More likely Mon-Fri, standard blocks
+            for (int day = 1; day <= 5; day++) // Monday to Friday
+            {
+                if (random.Next(100) < 85) // 85% chance of being available on a weekday
+                {
+                    // Morning Block (8/9 AM to 12/1 PM)
+                    if (random.Next(100) < 80)
+                    {
+                        availability.Add(new AvailabilitySlot
                         {
-                            if (random.Next(100) < 50) // 50% chance per time slot
-                            {
-                                availability[day].Add(new TimeSpan(hour, 0, 0));
-                            }
-                        }
+                            DayOfWeek = (DayOfWeek)day,
+                            StartTime = TimeSpan.FromHours(8 + random.Next(0, 2)),
+                            EndTime = TimeSpan.FromHours(12 + random.Next(0, 2))
+                        });
+                    }
+                    // Afternoon Block (1/2 PM to 5/6 PM)
+                    if (random.Next(100) < 80)
+                    {
+                        availability.Add(new AvailabilitySlot
+                        {
+                            DayOfWeek = (DayOfWeek)day,
+                            StartTime = TimeSpan.FromHours(13 + random.Next(0, 2)),
+                            EndTime = TimeSpan.FromHours(17 + random.Next(0, 2))
+                        });
                     }
                 }
             }
-
+            // Optional: Add rare weekend availability
             return availability;
         }
+
+        // Generates realistic availability hours for an OR using TimeRange
+        private Dictionary<DayOfWeek, List<TimeRange>> GenerateRealisticORAvailability()
+        {
+            var availability = new Dictionary<DayOfWeek, List<TimeRange>>();
+            for (int day = 1; day <= 5; day++) // Monday to Friday
+            {
+                var ranges = new List<TimeRange>();
+                // High chance of standard blocks
+                if (random.Next(100) < 95) ranges.Add(new TimeRange { StartTime = TimeSpan.FromHours(8), EndTime = TimeSpan.FromHours(12) });
+                if (random.Next(100) < 95) ranges.Add(new TimeRange { StartTime = TimeSpan.FromHours(13), EndTime = TimeSpan.FromHours(17) });
+                // Maybe an evening block sometimes?
+                if (random.Next(100) < 15) ranges.Add(new TimeRange { StartTime = TimeSpan.FromHours(18), EndTime = TimeSpan.FromHours(21) });
+
+                if (ranges.Any()) availability[(DayOfWeek)day] = ranges;
+            }
+            return availability;
+        }
+
+        // Removed GenerateInitialSchedule method
     }
 }

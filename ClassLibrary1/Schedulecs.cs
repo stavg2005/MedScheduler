@@ -10,6 +10,7 @@ namespace Models
         public Dictionary<int, int> PatientToDoctor { get; set; } = new Dictionary<int, int>(); // Patient ID to Doctor ID
         public Dictionary<DateTime, Dictionary<int, List<int>>> SurgerySchedule { get; set; } = new Dictionary<DateTime, Dictionary<int, List<int>>>(); // Date -> OperatingRoom -> List of PatientIDs
 
+        public double FitnessScore { get; set; } = -1; // Initialize to indicate not calculated
         // Get all patients assigned to a specific doctor
         public List<int> GetPatientsForDoctor(int doctorId)
         {
@@ -92,7 +93,7 @@ namespace Models
                     }
 
                     // Urgency handling
-                    score += patient.GetUrgencyValue() * 10;
+                    score += (int)patient.Urgency * 10;
 
                     // Continuity of care
                     if (patient.HasContinuityOfCare(doctorId))

@@ -1,414 +1,210 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Collections.Concurrent;
 using System.Linq;
+using ClassLibrary1;
 
-namespace Models
+
+
+
+namespace Models 
 {
     public class SurgeryScheduler
     {
-        #region Data Members
-        // Specialized collections for surgery scheduling
-        private readonly ConcurrentDictionary<int, Patient> PatientsById;
-        private readonly ConcurrentDictionary<int, Doctor> SurgeonsById;
-        private readonly ConcurrentDictionary<int, OperatingRoom> OperatingRoomsById;
+        private readonly List<Patient> patientsToSchedule;
+        private readonly List<Surgeon> availableSurgeons;
+        private readonly List<OperatingRoom> operatingRooms;
+        private readonly Dictionary<int, MedicalProcedure> proceduresById; // Lookup for procedure details
+        private readonly DateTime schedulingWeekStart;
+        private readonly TimeSpan schedulingGranularity = TimeSpan.FromMinutes(30); // Schedule in 30-min increments
+        private readonly TimeSpan workDayStart = new TimeSpan(8, 0, 0);
+        private readonly TimeSpan workDayEnd = new TimeSpan(17, 0, 0);
 
-        // AVL Tree replacements using SortedDictionary
-        private readonly SortedDictionary<string, List<Doctor>> SurgeonsBySpecialization;
-        private readonly SortedDictionary<int, List<OperatingRoom>> RoomsBySpecializationMatch;
-
-        // Priority queue using sorted list for patients by urgency
-        private readonly SortedList<(int UrgencyValue, int PatientId), Patient> PatientQueue;
-
-        // Schedule tracking
-        private readonly Schedule surgerySchedule;
-        private readonly DateTime startDate;
-        private readonly int scheduleDays;
-
-        // Statistics tracking
-        private int totalSurgeryPatients = 0;
-        public int scheduledSurgeries = 0;
-        private int unscheduledSurgeries = 0;
-        #endregion
-
-        #region Constructor
-        public SurgeryScheduler(List<Patient> patients, List<Doctor> surgeons, List<OperatingRoom> operatingRooms,
-                              DateTime startDate, int daysToSchedule = 7)
+        public SurgeryScheduler(
+            List<Patient> allPatients,
+            List<Doctor> allDoctors, // Will filter surgeons internally
+            List<OperatingRoom> operatingRooms,
+            List<MedicalProcedure> allProcedures,
+            DateTime schedulingWeekStartDate)
         {
-            // Initialize collections
-            PatientsById = new ConcurrentDictionary<int, Patient>();
-            SurgeonsById = new ConcurrentDictionary<int, Doctor>();
-            OperatingRoomsById = new ConcurrentDictionary<int, OperatingRoom>();
+            if (allPatients == null || allDoctors == null || operatingRooms == null || allProcedures == null)
+                throw new ArgumentNullException("Input lists cannot be null.");
 
-            SurgeonsBySpecialization = new SortedDictionary<string, List<Doctor>>();
-            RoomsBySpecializationMatch = new SortedDictionary<int, List<OperatingRoom>>();
+            // Filter patients needing surgery and not yet scheduled
+            this.patientsToSchedule = allPatients
+                .Where(p => p.NeedsSurgery && p.RequiredProcedureId.HasValue && !p.ScheduledSurgeryDate.HasValue)
+                .OrderByDescending(p => (int)p.Urgency)
+                .ThenBy(p => p.AdmissionDate)
+                .ToList();
 
-            // Custom comparer to prioritize by urgency first, then by patient ID
-            PatientQueue = new SortedList<(int UrgencyValue, int PatientId), Patient>(
-                Comparer<(int UrgencyValue, int PatientId)>.Create((a, b) => {
-                    // Sort by urgency descending
-                    int urgencyComparison = b.UrgencyValue.CompareTo(a.UrgencyValue);
-                    if (urgencyComparison != 0) return urgencyComparison;
+            // Filter for available surgeons
+            this.availableSurgeons = allDoctors
+                .OfType<Surgeon>()
+                .Where(s => s.IsAvailableForSurgery)
+                .ToList();
 
-                    // If urgency is the same, sort by patient ID ascending (deterministic)
-                    return a.PatientId.CompareTo(b.PatientId);
-                })
-            );
+            this.operatingRooms = operatingRooms;
 
-            // Initialize schedule and dates
-            surgerySchedule = new Schedule();
-            this.startDate = startDate;
-            this.scheduleDays = daysToSchedule;
+            // Create a lookup dictionary for procedures
+            this.proceduresById = allProcedures.ToDictionary(proc => proc.Id, proc => proc);
 
-            // Populate data structures
-            PopulateDataStructures(patients, surgeons, operatingRooms);
-        }
-        #endregion
+            if (schedulingWeekStartDate.DayOfWeek != DayOfWeek.Monday)
+                throw new ArgumentException("Scheduling week start date must be a Monday.", nameof(schedulingWeekStartDate));
+            this.schedulingWeekStart = schedulingWeekStartDate.Date;
 
-        #region Data Structure Setup
-        private void PopulateDataStructures(List<Patient> patients, List<Doctor> surgeons, List<OperatingRoom> operatingRooms)
-        {
-            // Process patients
-            foreach (var patient in patients)
-            {
-                if (patient.NeedsSurgery)
-                {
-                    totalSurgeryPatients++;
-                    PatientsById[patient.Id] = patient;
-
-                    // Add to priority queue
-                    PatientQueue.Add((patient.GetUrgencyValue(), patient.Id), patient);
-                }
-            }
-
-            // Process surgeons
-            foreach (var surgeon in surgeons)
-            {
-                SurgeonsById[surgeon.Id] = surgeon;
-
-                // Group by specialization
-                if (!SurgeonsBySpecialization.ContainsKey(surgeon.Specialization))
-                {
-                    SurgeonsBySpecialization[surgeon.Specialization] = new List<Doctor>();
-                }
-                SurgeonsBySpecialization[surgeon.Specialization].Add(surgeon);
-            }
-
-            // Process operating rooms
-            foreach (var room in operatingRooms)
-            {
-                OperatingRoomsById[room.Id] = room;
-
-                // Group by specialization match score 
-                // (higher score means the room is more specialized with more equipment)
-                int specializationScore = room.IsSpecialized ? 2 : 1;
-                if (!RoomsBySpecializationMatch.ContainsKey(specializationScore))
-                {
-                    RoomsBySpecializationMatch[specializationScore] = new List<OperatingRoom>();
-                }
-                RoomsBySpecializationMatch[specializationScore].Add(room);
-            }
-        }
-        #endregion
-
-        #region Main Scheduling Algorithm
-        public Schedule ScheduleSurgeries()
-        {
-            Console.WriteLine($"Starting surgery scheduling for {totalSurgeryPatients} patients...");
-            Console.WriteLine($"Available surgeons: {SurgeonsById.Count}");
-            Console.WriteLine($"Available operating rooms: {OperatingRoomsById.Count}");
-
-            // Pre-allocate all time slots for the schedule
-            InitializeScheduleTimeSlots();
-
-            // Process patients in priority order
-            while (PatientQueue.Count > 0)
-            {
-                // Get highest priority patient
-                var firstKey = PatientQueue.Keys[0];
-                var patient = PatientQueue[firstKey];
-                PatientQueue.RemoveAt(0);
-
-                Console.WriteLine($"Processing patient {patient.Id}: {patient.Condition} (Urgency: {patient.Urgency})");
-
-                // Try to schedule this patient
-                if (TryScheduleSurgery(patient))
-                {
-                    
-                    scheduledSurgeries++;
-                    Console.WriteLine($"✓ Scheduled surgery for patient {patient.Id}");
-                }
-                else
-                {
-                    unscheduledSurgeries++;
-                    Console.WriteLine($"✗ Could not schedule surgery for patient {patient.Id}");
-                }
-            }
-
-            // Print schedule statistics
-            PrintScheduleStatistics();
-
-            return surgerySchedule;
+            // Clear potentially stale schedules from ORs for the target week
+            ClearOrSchedulesForWeek(this.operatingRooms, this.schedulingWeekStart);
         }
 
-        private void InitializeScheduleTimeSlots()
+        /// <summary>
+        /// Attempts to schedule surgeries greedily for the upcoming week.
+        /// Updates Patient objects directly upon successful scheduling.
+        /// </summary>
+        /// <returns>A list of patients who could not be scheduled.</returns>
+        public List<Patient> ScheduleSurgeries()
         {
-            // Initialize the schedule with empty slots
-            for (int day = 0; day < scheduleDays; day++)
-            {
-                DateTime currentDate = startDate.AddDays(day);
-                DayOfWeek dayOfWeek = currentDate.DayOfWeek;
+            List<Patient> successfullyScheduled = new List<Patient>();
+            List<Patient> currentlyUnscheduled = new List<Patient>(patientsToSchedule); // Start with all needing scheduling
 
-                // Skip weekends if applicable
-                if (dayOfWeek == DayOfWeek.Saturday || dayOfWeek == DayOfWeek.Sunday)
+            // Iterate through days (Mon-Fri)
+            for (int dayOffset = 0; dayOffset < 5; dayOffset++)
+            {
+                DateTime currentDay = schedulingWeekStart.AddDays(dayOffset);
+                DayOfWeek currentDayOfWeek = currentDay.DayOfWeek;
+
+                // Iterate through time slots using granularity
+                TimeSpan currentTime = workDayStart;
+                while (currentTime < workDayEnd)
                 {
-                    continue;
-                }
+                    DateTime potentialSlotStart = currentDay + currentTime;
 
-                // Initialize this day in the surgery schedule
-                if (!surgerySchedule.SurgerySchedule.ContainsKey(currentDate))
-                {
-                    surgerySchedule.SurgerySchedule[currentDate] = new Dictionary<int, List<int>>();
-                }
-
-                // Initialize all operating rooms for this day
-                foreach (var roomId in OperatingRoomsById.Keys)
-                {
-                    surgerySchedule.SurgerySchedule[currentDate][roomId] = new List<int>();
-                }
-            }
-        }
-
-        private bool TryScheduleSurgery(Patient patient)
-        {
-            // Step 1: Find matching surgeon
-            Doctor matchingSurgeon = FindSuitableSurgeon(patient);
-            if (matchingSurgeon == null)
-            {
-                Console.WriteLine($"  No suitable surgeon found for patient {patient.Id}");
-                return false;
-            }
-
-            // IMPORTANT: Assign surgeon to patient
-            patient.AssignedSurgeonId = matchingSurgeon.Id;
-
-            // Step 2: Find matching operating room
-            var result = FindSuitableRoomAndDate(patient, matchingSurgeon);
-            if (!result.success)
-            {
-                Console.WriteLine($"  No suitable operating room or date found for patient {patient.Id}");
-                return false;
-            }
-
-            // Step 3: Schedule the surgery
-            OperatingRoom selectedRoom = result.room;
-            DateTime selectedDate = result.date;
-
-            // Add to schedule
-            surgerySchedule.SurgerySchedule[selectedDate][selectedRoom.Id].Add(patient.Id);
-
-            // Update patient record
-            patient.ScheduledSurgeryDate = selectedDate;
-
-            // Make sure to update the patient-to-doctor mapping in the schedule
-            if (!surgerySchedule.PatientToDoctor.ContainsKey(patient.Id))
-            {
-                surgerySchedule.PatientToDoctor[patient.Id] = matchingSurgeon.Id;
-            }
-
-            // Update the doctor-to-patients mapping
-            if (!surgerySchedule.DoctorToPatients.ContainsKey(matchingSurgeon.Id))
-            {
-                surgerySchedule.DoctorToPatients[matchingSurgeon.Id] = new List<int>();
-            }
-
-            if (!surgerySchedule.DoctorToPatients[matchingSurgeon.Id].Contains(patient.Id))
-            {
-                surgerySchedule.DoctorToPatients[matchingSurgeon.Id].Add(patient.Id);
-            }
-
-            Console.WriteLine($"  Scheduled for {selectedDate.ToShortDateString()} with Dr. {matchingSurgeon.Name} in Room {selectedRoom.Id}");
-
-            return true;
-        }
-        #endregion
-
-        #region Finding Resources
-        private Doctor FindSuitableSurgeon(Patient patient)
-        {
-            // First try to find surgeons with the right specialization
-            if (SurgeonsBySpecialization.TryGetValue(patient.RequiredSpecialization, out var specialists))
-            {
-                // Find available specialists sorted by most experienced first for high urgency,
-                // and by least loaded first for lower urgency
-                var availableSpecialists = specialists
-                    .Where(s => IsAvailableForNewSurgery(s))
-                    .OrderBy(s => patient.GetUrgencyValue() == 3 ? -s.ExperienceLevel : s.Workload)
-                    .ToList();
-
-                if (availableSpecialists.Any())
-                {
-                    return availableSpecialists.First();
-                }
-            }
-
-            // If no specialists are available, for high urgency cases we can try other surgeons
-            if (patient.GetUrgencyValue() == 3)
-            {
-                var anySurgeon = SurgeonsById.Values
-                    .Where(s => IsAvailableForNewSurgery(s))
-                    .OrderByDescending(s => s.ExperienceLevel)
-                    .FirstOrDefault();
-
-                return anySurgeon;
-            }
-
-            return null;
-        }
-
-        private (bool success, OperatingRoom room, DateTime date) FindSuitableRoomAndDate(Patient patient, Doctor surgeon)
-        {
-            // Go through each possible date in our scheduling window
-            for (int day = 0; day < scheduleDays; day++)
-            {
-                DateTime currentDate = startDate.AddDays(day);
-                DayOfWeek dayOfWeek = currentDate.DayOfWeek;
-
-                // Skip weekends
-                if (dayOfWeek == DayOfWeek.Saturday || dayOfWeek == DayOfWeek.Sunday)
-                {
-                    continue;
-                }
-
-                // First look for specialized rooms if applicable
-                foreach (var specializationScore in RoomsBySpecializationMatch.Keys.OrderByDescending(k => k))
-                {
-                    foreach (var room in RoomsBySpecializationMatch[specializationScore])
+                    // Try scheduling patients (highest urgency first) for this potential start time
+                    // Iterate over a copy because we modify the list
+                    foreach (var patient in currentlyUnscheduled.ToList())
                     {
-                        // Check if the room is suitable for this surgery and available on this date
-                        if (IsRoomSuitableForSurgery(room, patient) &&
-                            IsRoomAvailableOnDate(room, currentDate))
+                        // Get required procedure details
+                        if (!patient.RequiredProcedureId.HasValue ||
+                            !proceduresById.TryGetValue(patient.RequiredProcedureId.Value, out var procedure))
                         {
-                            return (true, room, currentDate);
+                            continue; // Skip patient if procedure details are missing
                         }
-                    }
-                }
-            }
 
-            // If high urgency and still not found a slot, check if we can find ANY room
-            if (patient.GetUrgencyValue() == 3)
-            {
-                for (int day = 0; day < scheduleDays; day++)
-                {
-                    DateTime currentDate = startDate.AddDays(day);
-                    if (currentDate.DayOfWeek == DayOfWeek.Saturday || currentDate.DayOfWeek == DayOfWeek.Sunday)
-                        continue;
+                        TimeSpan estimatedDuration = TimeSpan.FromHours(procedure.EstimatedDuration);
+                        DateTime potentialSlotEnd = potentialSlotStart + estimatedDuration;
 
-                    foreach (var room in OperatingRoomsById.Values)
-                    {
-                        if (IsRoomAvailableOnDate(room, currentDate))
+                        // Check if slot exceeds workday
+                        if (potentialSlotEnd.TimeOfDay > workDayEnd || potentialSlotEnd.Date > potentialSlotStart.Date)
                         {
-                            return (true, room, currentDate);
+                            continue; // Doesn't fit within the workday starting at this time
                         }
-                    }
-                }
-            }
 
-            return (false, null, DateTime.MinValue);
+                        // --- Find suitable and available Surgeon ---
+                        Surgeon surgeon = FindAvailableSurgeonForSlot(procedure, potentialSlotStart, potentialSlotEnd);
+
+                        if (surgeon != null)
+                        {
+                            // --- Find suitable and available Operating Room ---
+                            OperatingRoom or = FindAvailableOperatingRoomForSlot(procedure, potentialSlotStart, potentialSlotEnd);
+
+                            if (or != null)
+                            {
+                                // --- Assignment Found! ---
+                                Console.WriteLine($"Attempting schedule: P{patient.Id} with S{surgeon.Id} in OR{or.Id} at {potentialSlotStart}");
+
+                                // Update Patient record
+                                patient.ScheduledSurgeryDate = potentialSlotStart;
+                                patient.AssignedSurgeonId = surgeon.Id;
+                                patient.AssignedOperatingRoomId = or.Id; // Assign OR ID
+
+                                // Add busy slot to OR's schedule
+                                or.ScheduledSlots.Add(new TimeSlot
+                                {
+                                    StartTime = potentialSlotStart,
+                                    EndTime = potentialSlotEnd,
+                                    PatientId = patient.Id,
+                                    SurgeonId = surgeon.Id,
+                                    OperatingRoomId = or.Id
+                                });
+
+                                // Mark patient as scheduled and remove from pool for this run
+                                successfullyScheduled.Add(patient);
+                                currentlyUnscheduled.Remove(patient);
+
+                                // --- IMPORTANT: Potentially block surgeon/OR for subsequent checks in *this* timeslot iteration ---
+                                // This simple greedy approach moves to the next time slot after finding one match.
+                                // A more complex approach might try to fill the *same* timeslot with other ORs/Surgeons
+                                // before advancing time. For now, we advance time.
+
+                                // Since we scheduled someone, break the inner patient loop and advance time
+                                goto AdvanceTimeSlot; // Use goto for simplicity to break outer loop and advance time
+                            }
+                        }
+                    } // End patient loop for this slot
+
+                AdvanceTimeSlot: // Label to jump to after successful scheduling or trying all patients
+                    currentTime = currentTime.Add(schedulingGranularity); // Advance to next potential start time
+
+                } // End time slot loop for day
+            } // End day loop
+
+            Console.WriteLine($"Scheduling complete. Successful: {successfullyScheduled.Count}, Unscheduled: {currentlyUnscheduled.Count}");
+            return currentlyUnscheduled; // Return the list of patients who remain unscheduled
         }
-        #endregion
 
-        #region Helper Methods
-        private bool IsAvailableForNewSurgery(Doctor surgeon)
+        /// <summary>
+        /// Finds a surgeon qualified for the procedure and available during the specified time slot.
+        /// </summary>
+        private Surgeon FindAvailableSurgeonForSlot(MedicalProcedure procedure, DateTime slotStart, DateTime slotEnd)
         {
-            // Implement logic for surgeon availability
-            // This is a simplified version - you might have more complex rules
-            return surgeon.Workload < surgeon.MaxWorkload;
+            DayOfWeek dayOfWeek = slotStart.DayOfWeek;
+            TimeSpan startTimeOfDay = slotStart.TimeOfDay;
+            TimeSpan endTimeOfDay = slotEnd.TimeOfDay;
+
+            return availableSurgeons
+                .Where(s => procedure.IsQualified(s)) // Check specialization and experience
+                .FirstOrDefault(s => // Check availability
+                    s.Availability != null &&
+                    s.Availability.Any(availSlot =>
+                        availSlot.DayOfWeek == dayOfWeek &&
+                        availSlot.StartTime <= startTimeOfDay && // Required start is within or at start of available slot
+                        availSlot.EndTime >= endTimeOfDay) &&    // Required end is within or at end of available slot
+                                                                 // --- Add check against actual surgeon bookings if tracked separately ---
+                    IsSurgeonFree(s.Id, slotStart, slotEnd) // Placeholder for actual booking check
+                );
         }
 
-        private bool IsRoomSuitableForSurgery(OperatingRoom room, Patient patient)
+        /// <summary>
+        /// Finds an OR suitable for the procedure and available during the specified time slot.
+        /// </summary>
+        private OperatingRoom FindAvailableOperatingRoomForSlot(MedicalProcedure procedure, DateTime slotStart, DateTime slotEnd)
         {
-            // Room is specialized for this kind of surgery
-            if (room.IsSpecialized)
-            {
-                return room.Specialization == patient.RequiredSpecialization;
-            }
+            return operatingRooms
+                .Where(or => or.IsSuitableFor(procedure)) // Check specialization and equipment
+                .FirstOrDefault(or => or.IsSlotGenerallyAvailableAndFree(slotStart, slotEnd)); // Check general hours AND booked slots
+        }
 
-            // General operating room - can handle any surgery
+        /// <summary>
+        /// Placeholder: Checks if a surgeon is already booked for another procedure during this time.
+        /// Requires tracking surgeon schedules similar to OR schedules.
+        /// </summary>
+        private bool IsSurgeonFree(int surgeonId, DateTime slotStart, DateTime slotEnd)
+        {
+            // TODO: Implement actual check against a surgeon schedule tracking mechanism
+            // For now, assume availability list is sufficient (simplification)
             return true;
         }
 
-        private bool IsRoomAvailableOnDate(OperatingRoom room, DateTime date)
+        /// <summary>
+        /// Clears scheduled slots for the target week from ORs.
+        /// </summary>
+        private void ClearOrSchedulesForWeek(List<OperatingRoom> ors, DateTime weekStart)
         {
-            // Check if room is already scheduled for this date
-            if (!surgerySchedule.SurgerySchedule.ContainsKey(date) ||
-                !surgerySchedule.SurgerySchedule[date].ContainsKey(room.Id))
+            DateTime weekEnd = weekStart.AddDays(7);
+            foreach (var or in ors)
             {
-                return true;
-            }
-
-            // Check if the room already has a surgery scheduled
-            return surgerySchedule.SurgerySchedule[date][room.Id].Count == 0;
-        }
-
-        private void PrintScheduleStatistics()
-        {
-            Console.WriteLine();
-            Console.WriteLine("=== Surgery Schedule Statistics ===");
-            Console.WriteLine($"Total patients needing surgery: {totalSurgeryPatients}");
-            Console.WriteLine($"Scheduled surgeries: {scheduledSurgeries}");
-            Console.WriteLine($"Unscheduled surgeries: {unscheduledSurgeries}");
-
-            double scheduledPercentage = totalSurgeryPatients > 0 ?
-                (double)scheduledSurgeries / totalSurgeryPatients * 100 : 0;
-
-            Console.WriteLine($"Scheduling success rate: {scheduledPercentage:F1}%");
-
-            // Calculate utilization
-            int totalSlots = 0;
-            int usedSlots = 0;
-
-            foreach (var dateEntry in surgerySchedule.SurgerySchedule)
-            {
-                foreach (var roomEntry in dateEntry.Value)
-                {
-                    totalSlots++;
-                    if (roomEntry.Value.Count > 0)
-                    {
-                        usedSlots++;
-                    }
-                }
-            }
-
-            double utilizationRate = totalSlots > 0 ? (double)usedSlots / totalSlots * 100 : 0;
-            Console.WriteLine($"Operating room utilization: {utilizationRate:F1}%");
-
-            // Print schedule by day
-            Console.WriteLine();
-            Console.WriteLine("Schedule by day:");
-
-            foreach (var dateEntry in surgerySchedule.SurgerySchedule.OrderBy(e => e.Key))
-            {
-                int surgeriesThisDay = dateEntry.Value.Sum(r => r.Value.Count);
-                if (surgeriesThisDay > 0)
-                {
-                    Console.WriteLine($"{dateEntry.Key.ToShortDateString()}: {surgeriesThisDay} surgeries");
-
-                    // Print details of each surgery
-                    foreach (var roomEntry in dateEntry.Value.Where(r => r.Value.Count > 0))
-                    {
-                        OperatingRoom room = OperatingRoomsById[roomEntry.Key];
-                        foreach (int patientId in roomEntry.Value)
-                        {
-                            Patient patient = PatientsById[patientId];
-                            Doctor surgeon = SurgeonsById[patient.AssignedSurgeonId.Value];
-
-                            Console.WriteLine($"  Room {room.Id}: Patient {patientId} ({patient.Condition}) - Dr. {surgeon.Name}");
-                        }
-                    }
-                }
+                // Clear only slots relevant to this scheduler run if needed,
+                // or clear all within the week.
+                or.ScheduledSlots.RemoveAll(slot => slot.StartTime >= weekStart && slot.StartTime < weekEnd);
             }
         }
-        #endregion
     }
 }

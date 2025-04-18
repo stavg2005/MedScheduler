@@ -440,7 +440,7 @@ namespace MedScheduler.forms
                         int row = hourToRow.ContainsKey(hour) ? hourToRow[hour] : 0;
 
                         // Calculate duration based on complexity (between 1-3 hours)
-                        int duration = Math.Max(1, patient.ComplexityLevel);
+                        int duration = Math.Max(1, (int)patient.ComplexityLevel);
 
                         try
                         {

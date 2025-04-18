@@ -20,13 +20,13 @@ namespace MedScheduler.forms
 
         // Dashboard is already there from your code
         public static DoctorsForm doctorsForm;
-
+        public static PatientForm patientForm;
         private GeneticAlgorithmPanel geneticAlgorithmPanel;
 
         // Dashboard is already there from your code
             public static SchedulesForm schedulesForm;
             public static SchedulerOrchestrator s;
-        public static assignment assignments;
+        
         public DataManager db = new DataManager();
         public static Schedule main = new Schedule();
         
@@ -118,9 +118,9 @@ namespace MedScheduler.forms
 
             // Initialize page user controls
             doctorsForm = new DoctorsForm();
-
+            patientForm = new PatientForm();
             // Create navigation items
-            string[] navItems = { "Dashboard", "Doctors", "Patients", "Surgeries", "Schedules", "Reports", "Settings","Algorithm","Assingments" };
+            string[] navItems = { "Dashboard", "Doctors", "Patients", "Surgeries","Algorithm" };
             for (int i = 0; i < navItems.Length; i++)
             {
                 Panel navItemPanel = new Panel
@@ -203,36 +203,18 @@ namespace MedScheduler.forms
                     doctorsForm.BringToFront();
                     break;
                 case 2: // Patients
-                        // Add Patients page when implemented
-                    ShowPlaceholderPage("Patients");
+                    contentPanel.Controls.Add(patientForm);
+                    patientForm.BringToFront();
+                    
                     break;
-                case 3: // Surgeries
-                        // Add Surgeries page when implemented
-                    ShowPlaceholderPage("Surgeries");
-                    break;
-                case 4: // Schedules
+                case 3: // Schedules
                     if(schedulesForm != null)
                     {
                         contentPanel.Controls.Add(schedulesForm);
                         schedulesForm.BringToFront();
                     }
- 
                     break;
-                case 5: // Reports
-                    if (assignments != null)
-                    {
-                        contentPanel.Controls.Add(assignments);
-                        assignments.BringToFront();
-                    }
-
-                        ShowPlaceholderPage("DoctorForm");
-                    
-                    break;
-                case 6: // Settings
-                        // Add Settings page when implemented
-                    ShowPlaceholderPage("Settings");
-                    break;
-                case 7:
+                case 4:
                     
                     contentPanel.Controls.Add(geneticAlgorithmPanel);
                     geneticAlgorithmPanel.BringToFront();
@@ -297,7 +279,7 @@ namespace MedScheduler.forms
             // Stats Cards
             CreateStatsCard(dashboardPanel, 20, 60, "Total Doctors", doctors.Count.ToString(), "👨‍⚕️", "#3498DB");
             CreateStatsCard(dashboardPanel, 280, 60, "Total Patients", patients.Count.ToString(), "🤒", "#E74C3C");
-            CreateStatsCard(dashboardPanel, 540, 60, "Scheduled Surgeries",s.totalSurgeries.ToString(), "🔪", "#2ECC71");
+            CreateStatsCard(dashboardPanel, 540, 60, "Scheduled Surgeries", 404.ToString(), "🔪", "#2ECC71");
 
             // Today's Schedule Panel
             Panel schedulePanel = CreatePanel(dashboardPanel, 20, 200, 760, 200, "Today's Schedule");
@@ -381,13 +363,12 @@ namespace MedScheduler.forms
 
 
             string[] metrics = {
-    "Specialization Match Rate:", $"{s.stat.specializationMatchRate:F1}%", "#2ECC71",
-    "Average Doctor Workload:", $"{s.stat.AvarageDoctorWorkLoad:F1}%", "#3498DB",
-    "Patients Assigned:", $"{s.stat.assignmentPercentage}%", "#2C3E50",
-    "Urgent Cases Priority:", $"{s.stat.UrgentCasesPriority:F1}%", "#2ECC71"
+    "Specialization Match Rate:", $"{s.finalStatistics.specializationMatchRate:F1}%", "#2ECC71",
+    "Average Doctor Workload:", $"{s.finalStatistics.AvarageDoctorWorkLoad:F1}%", "#3498DB",
+    "Patients Assigned:", $"{s.finalStatistics.assignmentPercentage}%", "#2C3E50"
 };
 
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < 3; i++)
             {
                 Label metricLabel = new Label
                 {

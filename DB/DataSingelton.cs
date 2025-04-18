@@ -2,6 +2,7 @@
 using Models;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -18,12 +19,14 @@ namespace DB
         public List<Patient> Patients { get; private set; }
         public List<OperatingRoom> OperatingRooms { get; private set; }
 
+        public List<MedicalProcedure> Procedures { get; private set; }
         // Private constructor to prevent instantiation from outside
         private DataSingelton()
         {
             Doctors = new List<Doctor>();
             Patients = new List<Patient>();
             OperatingRooms = new List<OperatingRoom>();
+            Procedures = new List<MedicalProcedure>();
         }
 
         // Public property to get the single instance
@@ -46,6 +49,7 @@ namespace DB
             Doctors = db.GetDoctors();
             Patients = db.GetPatients();
             OperatingRooms = db.GetOperatingRooms();
+            Procedures = db.GetProcedures();
         }
     }
 

@@ -1,26 +1,31 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
-using System.Drawing.Drawing2D;
+using System.Data;
 using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
 using System.Windows.Forms;
-using DB; // Assuming this contains DataManager and DataSingelton
-using Models; // Assuming this contains your Doctor, Patient, Schedule classes
+using DB;
+using Models;
+using static System.Windows.Forms.LinkLabel;
 
 namespace MedScheduler.forms
 {
-    public partial class DoctorsForm : UserControl
+    public partial class PatientForm: UserControl
     {
-        // Data Access
-        // Assuming DataManager is in DB namespace
+       
+             // Data Access
+             // Assuming DataManager is in DB namespace
 
-        // Related Forms/Data (Assumed from original)
+            // Related Forms/Data (Assumed from original)
         private SchedulesForm schedulesForm;
         public static SchedulerOrchestrator s;
         public static Schedule main = new Schedule();
 
         // --- Pagination Fields ---
-        private List<Doctor> allDoctors = new List<Doctor>(); // Store all doctors here
+        private List<Patient> allPatients = new List<Patient>(); // Store all doctors here
         private int currentPage = 1;
         private int doctorsPerPage = 10; // How many doctors to show per page
         private int totalPages = 1;
@@ -32,7 +37,7 @@ namespace MedScheduler.forms
         private Panel contentPanel;    // Main container panel (Dock.Fill within UserControl)
 
         // --- Constructor ---
-        public DoctorsForm()
+        public PatientForm()
         {
             InitializeComponentDoctors(); // Create UI elements using Docking
             this.Size = new Size(1000, 700); // Set desired initial size
@@ -47,10 +52,10 @@ namespace MedScheduler.forms
             try
             {
                 // Fetch all doctors once - ensure list is never null
-                allDoctors = DataSingelton.Instance.Doctors ?? new List<Doctor>();
+                allPatients = DataSingelton.Instance.Patients ?? new List<Patient>();
 
                 // Calculate total pages based on the loaded data
-                totalPages = (!allDoctors.Any()) ? 1 : (int)Math.Ceiling((double)allDoctors.Count / doctorsPerPage);
+                totalPages = (!allPatients.Any()) ? 1 : (int)Math.Ceiling((double)allPatients.Count / doctorsPerPage);
 
                 // Ensure current page is valid after load/refresh
                 currentPage = 1; // Always reset to page 1 after full load/refresh
@@ -65,7 +70,7 @@ namespace MedScheduler.forms
             {
                 MessageBox.Show($"Error loading doctor data: {ex.Message}", "Data Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 // Ensure a safe state if loading fails
-                allDoctors = new List<Doctor>();
+                allPatients = new List<Patient>();
                 totalPages = 1;
                 currentPage = 1;
                 // Display an empty page if possible
@@ -95,10 +100,10 @@ namespace MedScheduler.forms
                 AddLogMessage("Error: UI Panels not initialized in DisplayPage.");
                 return;
             }
-            if (allDoctors == null)
+            if (allPatients == null)
             {
                 AddLogMessage("Error: allDoctors list is null in DisplayPage. Recovering.");
-                allDoctors = new List<Doctor>();
+                allPatients = new List<Patient>();
                 totalPages = 1;
                 pageNumber = 1;
             }
@@ -111,7 +116,7 @@ namespace MedScheduler.forms
 
             // --- Clear existing doctor rows (but not the header) ---
             var rowsToRemove = tablePanel.Controls.OfType<Panel>()
-                                       .Where(p => p.Tag?.ToString() == "DoctorRows")
+                                       .Where(p => p.Tag?.ToString() == "PatientRow")
                                        .ToList();
             foreach (var row in rowsToRemove)
             {
@@ -120,7 +125,7 @@ namespace MedScheduler.forms
             }
 
             // --- Get doctors for the current page using LINQ ---
-            var PatientToShow = allDoctors
+            var PatientToShow = allPatients
                                 .Skip((currentPage - 1) * doctorsPerPage)
                                 .Take(doctorsPerPage)
                                 .ToList();
@@ -130,14 +135,14 @@ namespace MedScheduler.forms
             foreach (var pt in PatientToShow)
             {
                 string name = pt.Name ?? "N/A";
-                string specilazation = pt.Specialization ?? "N/A";
-                string workload = pt.Workload.ToString() ?? "0";
+                string condition = pt.Condition ?? "N/A";
+                string requieres_surgery = pt.NeedsSurgery.ToString() ?? "0";
 
-                AddPatientRow(tablePanel, 0, yPos, name, specilazation, workload, pt.Id);
+                AddPatientRow(tablePanel, 0, yPos, name, condition, requieres_surgery, pt.Id);
                 // yPos will be managed by the docking/layout of rows if we switch rows to use Dock.Top
                 // For now, we keep manual Y, but relative to header bottom
                 // We find the last added row to calculate next Y
-                Panel lastRow = tablePanel.Controls.OfType<Panel>().LastOrDefault(p => p.Tag?.ToString() == "DoctorRows");
+                Panel lastRow = tablePanel.Controls.OfType<Panel>().LastOrDefault(p => p.Tag?.ToString() == "PatientRow");
                 yPos = (lastRow?.Bottom ?? yPos); // Start next row below the last one
             }
 
@@ -284,7 +289,7 @@ namespace MedScheduler.forms
                 // Use parent's ClientSize for width, considering scrollbars if any
                 Size = new Size(parent.ClientSize.Width - (System.Windows.Forms.SystemInformation.VerticalScrollBarWidth * (parent.VerticalScroll.Visible ? 1 : 0)), 40),
                 BackColor = Color.White,
-                Tag = "DoctorRows", // Tag to identify for removal
+                Tag = "PatientRow", // Tag to identify for removal
                 // Anchor Left/Right so it resizes horizontally with parent
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 Visible = true
@@ -525,7 +530,7 @@ namespace MedScheduler.forms
                 BackColor = Color.White,
                 BorderStyle = BorderStyle.FixedSingle,
                 Dock = DockStyle.Fill,
-                AutoScroll = true
+                AutoScroll =true
             };
 
 
@@ -544,8 +549,8 @@ namespace MedScheduler.forms
 
 
             this.ResumeLayout(true); // Resume layout and perform layout actions
-                                     // DIAGNOSTICS: Add these lines
-            AddLogMessage($"--- Layout Diagnostics ---");
+            // DIAGNOSTICS: Add these lines
+    AddLogMessage($"--- Layout Diagnostics ---");
             if (searchPanel != null) AddLogMessage($"SearchPanel Bounds: {searchPanel.Bounds}");
             // Find the header panel in the content panel's controls
             var header = contentPanel.Controls.OfType<Panel>().FirstOrDefault(p => p.Tag?.ToString() == "TableHeader");
@@ -569,7 +574,7 @@ namespace MedScheduler.forms
             // Removed: parentTablePanel.Controls.Add(tableHeaderPanel);
 
             // Define column headers
-            string[] columnHeaders = { "Name", "spescilzation", "workload", "Actions" };
+            string[] columnHeaders = { "Name", "condition", "surgery", "Actions" };
             int[] columnStartX = { tableHeaderPanel.Padding.Left,                // Name starts at left padding (Index 0)
                  tableHeaderPanel.Padding.Left + 220,          // Specialty starts after Name column space (Index 1)
                  tableHeaderPanel.Padding.Left + 220 + 220,    // Patients starts after Specialty column space (Index 2)
@@ -623,10 +628,10 @@ namespace MedScheduler.forms
                 Anchor = AnchorStyles.Top | AnchorStyles.Left // Anchor left
             };
             // Placeholder text logic for searchBox
-            searchBox.Enter += (s, e) => { if (searchBox.Text == "Search doctors...") { searchBox.Text = ""; searchBox.ForeColor = Color.Black; } };
-            searchBox.Leave += (s, e) => { if (string.IsNullOrWhiteSpace(searchBox.Text)) { searchBox.Text = "Search doctors..."; searchBox.ForeColor = Color.Gray; } };
+            searchBox.Enter += (s, e) => { if (searchBox.Text == "Search Patients...") { searchBox.Text = ""; searchBox.ForeColor = Color.Black; } };
+            searchBox.Leave += (s, e) => { if (string.IsNullOrWhiteSpace(searchBox.Text)) { searchBox.Text = "Search Patients..."; searchBox.ForeColor = Color.Gray; } };
 
-
+            
 
             // Buttons anchored to the right
             Button refreshButton = new Button // Create Refresh Button
@@ -664,7 +669,7 @@ namespace MedScheduler.forms
 
 
             parent.Controls.Add(searchBox);
-
+            
             parent.Controls.Add(addButton);   // Add before refresh if positioning left-of
             parent.Controls.Add(refreshButton);
 
@@ -676,7 +681,7 @@ namespace MedScheduler.forms
             int buttonWidth = 40;
             int buttonHeight = 30;
             // We create a fixed number of buttons initially, UpdatePaginationButtons will manage visibility/text
-            int maxTotalButtons = (DataSingelton.Instance.Doctors.Count) / 10 + 2; // e.g., Prev + 5 numbers + Next
+            int maxTotalButtons = (DataSingelton.Instance.Patients.Count) / 10 + 2; // e.g., Prev + 5 numbers + Next
 
             // Create Prev Button
             Button prevButton = new Button
@@ -739,7 +744,7 @@ namespace MedScheduler.forms
         }
 
 
-
+       
 
 
         // --- Utility / Other Methods ---
@@ -765,11 +770,5 @@ namespace MedScheduler.forms
                 MessageBox.Show($"Error during 'start' execution: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
-
-    } // End of DoctorsForm class
-
-    // Partial class modifier allows InitializeComponent if using WinForms Designer alongside code
-    // If purely code-generated, 'partial' isn't strictly required but doesn't hurt.
-    // public partial class DoctorsForm { } // No InitializeComponent method needed if not using Designer
-
-} // End of namespace
+    }
+    }

@@ -3,9 +3,16 @@ using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading.Tasks;
+// Assuming your Models namespace contains Doctor, Patient, Surgeon, Schedule, Enums, etc.
+using ClassLibrary1;
 
-namespace Models
+namespace Models// Or your appropriate namespace
 {
+
+
+    /// <summary>
+    /// Implements the genetic algorithm for scheduling doctors to patients.
+    /// </summary>
     public class DoctorScheduler
     {
         #region Data Members
@@ -14,96 +21,126 @@ namespace Models
         private readonly int populationSize;
         private readonly Random rnd = new Random();
 
-        // Resource collections - using concurrent dictionary for thread safety
-        private ConcurrentDictionary<int, Doctor> DoctorsById { get; set; }
-        private ConcurrentDictionary<int, Patient> PatientsById { get; set; }
+        // Resource collections - using concurrent dictionary for thread safety if needed,
+        // but could be standard Dictionary if populated once at the start.
+        private Dictionary<int, Doctor> DoctorsById { get; set; }
+        private Dictionary<int, Patient> PatientsById { get; set; }
 
-        // Sorted collections for efficient lookup
-        private SortedDictionary<string, List<Doctor>> DoctorsBySpecialization { get; set; }
-        private SortedDictionary<int, List<Patient>> PatientsByUrgency { get; set; }
+        // Sorted collections for potentially efficient lookup (optional)
+        private Dictionary<string, List<Doctor>> DoctorsBySpecialization { get; set; }
+        // Store patients grouped by UrgencyLevel Enum
+        private SortedDictionary<UrgencyLevel, List<Patient>> PatientsByUrgency { get; set; }
 
         // Termination condition variables
-        public  int maxGenerations = 500;
-        public  int currentGeneration = 0;
-        public  double fitnessThreshold = 100000;
-        public  int stagnationCount = 0;
+        public int maxGenerations = 500;
+        public int currentGeneration = 0;
+        public double fitnessThreshold = 100000; // Adjust as needed based on scoring scale
+        public int stagnationCount = 0;
         public int maxStagnation = 100;
-        public  double bestFitness = double.MinValue;
-        public  double previousBestFitness = double.MinValue;
+        public double bestFitness = double.MinValue;
+        public double previousBestFitness = double.MinValue;
 
         // Genetic algorithm parameters
         private readonly double crossoverRate = 0.8;
-        private readonly double mutationRate = 0.4;
+        private readonly double mutationRate = 0.1; 
         private readonly int tournamentSize = 7;
-        private readonly int elitismCount;
+        private readonly int elitismCount; // Percentage of population to carry over
 
-        // Weights for fitness function
-        private readonly double specializationMatchWeight = 6;
-        private readonly double urgencyWeight = 4.5;
-        private readonly double workloadBalanceWeight = 5.5;
-        private readonly double patientAssignmentWeight = 1.5;
-        private readonly double continuityOfCareWeight = 2;
-        private readonly double hierarchyWeight = 2.5;
-        private readonly double experienceLevelWeight = 3.0;
+        // Weights for fitness function - ADJUST THESE BASED ON PRIORITIES
+        private readonly double specializationMatchWeight = 6.0;
+        private readonly double urgencyWeight = 4.5; // Weight per urgency level (High=3 * weight)
+        private readonly double workloadBalanceWeight = 5.5; // Penalty reduction for balanced load
+        private readonly double patientAssignmentWeight = 1.5; // Base score per assignment
+        private readonly double continuityOfCareWeight = 2.0;
+        private readonly double hierarchyWeight = 2.5; // Bonus for matching experience exactly
+        private readonly double experienceLevelWeight = 3.0; // Bonus for meeting minimum experience
+        private readonly double preferenceMatchWeight = 4.0; // NEW: Weight for doctor preference matching
 
-        // For tracking assignments for continuity of care
-        private ConcurrentDictionary<int, int> previousAssignments = new ConcurrentDictionary<int, int>();
+        // For tracking assignments for continuity of care (simple version)
+        // Key: PatientId, Value: Last known DoctorId from input data
+        private Dictionary<int, int> previousAssignments = new Dictionary<int, int>();
         #endregion
 
         #region Constructor
+        /// <summary>
+        /// Initializes the DoctorScheduler.
+        /// </summary>
+        /// <param name="populationSize">Number of candidate schedules in each generation.</param>
+        /// <param name="doctors">List of available doctors (MUST have Preferences populated).</param>
+        /// <param name="patients">List of patients needing assignment.</param>
         public DoctorScheduler(int populationSize, List<Doctor> doctors, List<Patient> patients)
         {
+            if (doctors == null || !doctors.Any() || patients == null)
+            {
+                throw new ArgumentException("Doctors and patients lists cannot be null or empty.");
+            }
+
             this.populationSize = populationSize;
-            this.elitismCount = (int)(populationSize * 0.1); // 10% elitism
+            // Ensure elitism count is at least 1 if population is small
+            this.elitismCount = Math.Max(1, (int)(populationSize * 0.1)); // e.g., 10% elitism
 
             // Initialize concurrent dictionaries
-            DoctorsById = new ConcurrentDictionary<int, Doctor>();
-            PatientsById = new ConcurrentDictionary<int, Patient>();
+            DoctorsById = new Dictionary<int, Doctor>();
+            PatientsById = new Dictionary<int, Patient>();
 
             // Initialize sorted dictionaries
-            DoctorsBySpecialization = new SortedDictionary<string, List<Doctor>>();
-            PatientsByUrgency = new SortedDictionary<int, List<Patient>>(Comparer<int>.Create((a, b) => b.CompareTo(a))); // Descending order
+            DoctorsBySpecialization = new Dictionary<string, List<Doctor>>();
+            // Use UrgencyLevel Enum as key, sort descending by the enum's underlying value
+            PatientsByUrgency = new SortedDictionary<UrgencyLevel, List<Patient>>(
+                Comparer<UrgencyLevel>.Create((a, b) => ((int)b).CompareTo((int)a))
+            );
 
-            // Populate the dictionaries
+            // Populate the dictionaries and prepare data
             PopulateDataStructures(doctors, patients);
         }
         #endregion
 
         #region Data Structure Setup
+        /// <summary>
+        /// Populates internal data structures from the input lists.
+        /// Resets doctor workloads and extracts previous assignments.
+        /// </summary>
         private void PopulateDataStructures(List<Doctor> doctors, List<Patient> patients)
         {
-            // Populate DoctorsById
+            // Populate DoctorsById and DoctorsBySpecialization
             foreach (var doctor in doctors)
             {
+                if (doctor == null) continue; // Skip null entries if any
+
                 DoctorsById[doctor.Id] = doctor;
+                doctor.Workload = 0; // Reset workload for the scheduling run
 
-                // Initialize workload to zero
-                doctor.Workload = 0;
-
-                // Populate DoctorsBySpecialization
-                if (!DoctorsBySpecialization.ContainsKey(doctor.Specialization))
+                if (!string.IsNullOrEmpty(doctor.Specialization))
                 {
-                    DoctorsBySpecialization[doctor.Specialization] = new List<Doctor>();
+                    if (!DoctorsBySpecialization.ContainsKey(doctor.Specialization))
+                    {
+                        DoctorsBySpecialization[doctor.Specialization] = new List<Doctor>();
+                    }
+                    DoctorsBySpecialization[doctor.Specialization].Add(doctor);
                 }
-                DoctorsBySpecialization[doctor.Specialization].Add(doctor);
+                // NOTE: Assumes doctor.Preferences list is already populated before calling the constructor
             }
 
             // Populate PatientsById and PatientsByUrgency
             foreach (var patient in patients)
             {
+                if (patient == null) continue; // Skip null entries if any
+
                 PatientsById[patient.Id] = patient;
 
-                int urgencyValue = patient.GetUrgencyValue();
-                if (!PatientsByUrgency.ContainsKey(urgencyValue))
+                // Use the UrgencyLevel Enum directly as the key
+                UrgencyLevel urgency = patient.Urgency;
+                if (!PatientsByUrgency.ContainsKey(urgency))
                 {
-                    PatientsByUrgency[urgencyValue] = new List<Patient>();
+                    PatientsByUrgency[urgency] = new List<Patient>();
                 }
-                PatientsByUrgency[urgencyValue].Add(patient);
+                PatientsByUrgency[urgency].Add(patient);
 
-                // If patient has a previous doctor assignment, add to previousAssignments
-                if (patient.PreviousDoctors.Any())
+                // If patient has a previous doctor assignment history, store the most recent one
+                // (This is a simplification for continuity check)
+                if (patient.PreviousDoctors != null && patient.PreviousDoctors.Any())
                 {
-                    // Use the most recent doctor for continuity
+                    // Consider using the last ID in the list as the "most recent"
                     previousAssignments[patient.Id] = patient.PreviousDoctors.Last();
                 }
             }
@@ -111,33 +148,41 @@ namespace Models
         #endregion
 
         #region Main Algorithm
+        /// <summary>
+        /// Runs the genetic algorithm to find an optimal schedule.
+        /// </summary>
+        /// <returns>The best schedule found.</returns>
         public Schedule Solve()
         {
-            // Initialize the population with random solutions
+            // Initialize the population with random (or semi-random) solutions
             Population = GeneratePopulation(populationSize);
+            CalculateFitnessForAll(Population); // Calculate initial fitness
 
             Console.WriteLine("Initial population generated.");
-            Console.WriteLine($"Best initial fitness: {Population.Max(ScoreSchedule)}");
+            bestFitness = Population.Any() ? Population.Max(s => s.FitnessScore) : double.MinValue; // Handle empty population
+            Console.WriteLine($"Best initial fitness: {bestFitness:F2}");
 
             // Main evolutionary loop
             while (!TerminationConditionMet())
             {
                 currentGeneration++;
 
-                // Create a new generation
-                List<Schedule> newPopulation = new List<Schedule>();
+                List<Schedule> newPopulation = new List<Schedule>(populationSize);
 
-                // Elitism: Keep the best solutions
-                newPopulation.AddRange(Population.OrderByDescending(ScoreSchedule).Take(elitismCount));
+                // 1. Elitism: Keep the best individuals
+                var elite = Population.OrderByDescending(s => s.FitnessScore).Take(elitismCount);
+                newPopulation.AddRange(elite.Select(CloneSchedule)); // Add clones of elite
 
-                // Fill the rest with new offspring
+                // 2. Selection, Crossover, Mutation to fill the rest
                 while (newPopulation.Count < populationSize)
                 {
-                    // Parent selection using tournament selection
                     Schedule parent1 = TournamentSelection();
                     Schedule parent2 = TournamentSelection();
 
-                    // Crossover with probability
+                    // Ensure parents are not null (can happen if population becomes empty unexpectedly)
+                    if (parent1 == null || parent2 == null) continue;
+
+
                     List<Schedule> offspring;
                     if (rnd.NextDouble() < crossoverRate)
                     {
@@ -145,18 +190,17 @@ namespace Models
                     }
                     else
                     {
-                        // If no crossover, clone parents
+                        // No crossover, just clone parents
                         offspring = new List<Schedule> { CloneSchedule(parent1), CloneSchedule(parent2) };
                     }
 
-                    // Mutation with probability
+                    // Apply mutation
                     foreach (var child in offspring)
                     {
                         if (rnd.NextDouble() < mutationRate)
                         {
                             Mutate(child);
                         }
-
                         // Add to new population if there's space
                         if (newPopulation.Count < populationSize)
                         {
@@ -165,645 +209,855 @@ namespace Models
                     }
                 }
 
-                // Replace the old population
+                // Replace the old population and calculate fitness
                 Population = newPopulation;
+                CalculateFitnessForAll(Population);
 
-                // Track the best fitness
-                double currentBestFitness = Population.Max(ScoreSchedule);
-
-                // Update stagnation counter
-                if (currentBestFitness > bestFitness)
-                {
-                    previousBestFitness = bestFitness;
-                    bestFitness = currentBestFitness;
-                    stagnationCount = 0;
-
-                    Console.WriteLine($"Generation {currentGeneration}: Improvement found! Best fitness: {bestFitness}");
-
-                    // Print best schedule details periodically
-                    
-                    
-                        PrintScheduleDetails(GetLeadingSchedule());
-                    
-                }
-                else
-                {
-                    stagnationCount++;
-                    Console.WriteLine($"Generation {currentGeneration}: No improvement. Stagnation count: {stagnationCount}");
-                }
+                // Track the best fitness and stagnation
+                double currentBestFitness = Population.Any() ? Population.Max(s => s.FitnessScore) : double.MinValue;
+                UpdateStagnation(currentBestFitness);
             }
 
             Console.WriteLine($"Genetic algorithm terminated after {currentGeneration} generations");
-            Console.WriteLine($"Final best fitness: {bestFitness}");
-
-            // Update previous assignments for continuity of care in future runs
             var finalSchedule = GetLeadingSchedule();
-            foreach (var pair in finalSchedule.PatientToDoctor)
-            {
-                previousAssignments[pair.Key] = pair.Value;
-            }
+            Console.WriteLine($"Final best fitness: {finalSchedule?.FitnessScore ?? double.MinValue:F2}");
+
+            // Optional: Update persistent previous assignments if needed for future runs
+            // UpdatePreviousAssignments(finalSchedule);
 
             return finalSchedule;
         }
         #endregion
 
         #region Population Generation
+        /// <summary>
+        /// Generates the initial population of candidate schedules.
+        /// </summary>
         private List<Schedule> GeneratePopulation(int size)
         {
             List<Schedule> population = new List<Schedule>(size);
+            // Use ConcurrentBag for thread-safe adding in parallel loop
+            ConcurrentBag<Schedule> populationBag = new ConcurrentBag<Schedule>();
 
-            // Create multiple schedules in parallel for better performance
             Parallel.For(0, size, i =>
             {
-                var schedule = GenerateRandomSchedule();
-                lock (population)
-                {
-                    population.Add(schedule);
-                }
+                var schedule = GenerateInitialSchedule(); // Use a potentially smarter initial generation
+                populationBag.Add(schedule);
             });
 
-            return population;
+            return populationBag.ToList();
         }
 
-        private Schedule GenerateRandomSchedule()
+        /// <summary>
+        /// Generates a single initial schedule, attempting some reasonable assignments.
+        /// </summary>
+        private Schedule GenerateInitialSchedule()
         {
-            var schedule = new Schedule
+            var schedule = new Schedule();
+            // Create a temporary dictionary to track workloads for this schedule generation
+            var tempDoctorWorkloads = DoctorsById.ToDictionary(kvp => kvp.Key, kvp => 0);
+
+            // Prioritize assigning patients by urgency (High -> Medium -> Low)
+            // Use the PatientsByUrgency dictionary which is already sorted descending
+            foreach (var urgencyGroup in PatientsByUrgency) // Iterates High -> Medium -> Low
             {
-                DoctorToPatients = new Dictionary<int, List<int>>(),
-                PatientToDoctor = new Dictionary<int, int>()
-            };
+                // Shuffle patients within the same urgency level for randomness
+                var patientsInUrgency = urgencyGroup.Value.OrderBy(_ => rnd.Next()).ToList();
 
-            // Reset workloads
-            foreach (var doctor in DoctorsById.Values)
-            {
-                doctor.Workload = 0;
-            }
-
-            // CHANGE: Introduce more randomness in initial assignments
-            var patients = PatientsById.Values
-                .Where(p => !p.NeedsSurgery)
-                .OrderBy(_ => rnd.Next()) // Fully randomized order
-                .ToList();
-
-            // CHANGE: Only apply optimizations to a portion of patients (e.g., 40%)
-            int optimizationCutoff = (int)(patients.Count * 0.4);
-
-            for (int i = 0; i < patients.Count; i++)
-            {
-                var patient = patients[i];
-
-                // Only apply optimization criteria for higher-priority patients
-                if (i < optimizationCutoff && patient.GetUrgencyValue() == 3) // Only high urgency
+                foreach (var patient in patientsInUrgency)
                 {
-                    // Apply your existing optimization logic for these
-                    // [your existing logic here]
-                }
-                else
-                {
-                    // Completely random assignment for others
-                    var availableDoctors = DoctorsById.Values
-                        .Where(d => d.Workload < d.MaxWorkload)
-                        .OrderBy(_ => rnd.Next()) // Random order
-                        .ToList();
+                    if (patient.NeedsSurgery) continue; // Skip patients needing surgery for this scheduler
 
-                    if (availableDoctors.Any())
+                    Doctor assignedDoctor = FindBestInitialDoctorForPatient(patient, tempDoctorWorkloads);
+
+                    if (assignedDoctor != null)
                     {
-                        AssignPatientToDoctor(schedule, patient.Id, availableDoctors.First().Id);
+                        AssignPatientToDoctor(schedule, patient.Id, assignedDoctor.Id);
+                        tempDoctorWorkloads[assignedDoctor.Id]++; // Increment temp workload
                     }
+                    // else: patient remains unassigned in this initial schedule
                 }
             }
-
             return schedule;
+        }
+
+        /// <summary>
+        /// Helper to find a suitable doctor for initial assignment, prioritizing criteria.
+        /// </summary>
+        private Doctor FindBestInitialDoctorForPatient(Patient patient, Dictionary<int, int> currentWorkloads)
+        {
+            // 1. Try previous doctor if available and suitable
+            if (previousAssignments.TryGetValue(patient.Id, out int prevDoctorId) &&
+                DoctorsById.TryGetValue(prevDoctorId, out Doctor prevDoctor) &&
+                currentWorkloads[prevDoctorId] < prevDoctor.MaxWorkload &&
+                prevDoctor.IsSuitableFor(patient)) // Use Doctor's suitability check
+            {
+                return prevDoctor;
+            }
+
+            // 2. Try specialists with capacity
+            if (DoctorsBySpecialization.TryGetValue(patient.RequiredSpecialization, out var specialists))
+            {
+                var suitableSpecialist = specialists
+                    .Where(d => currentWorkloads.ContainsKey(d.Id) && // Ensure doctor is in workload dict
+                                currentWorkloads[d.Id] < d.MaxWorkload &&
+                                d.IsSuitableFor(patient))
+                    .OrderBy(d => currentWorkloads[d.Id]) // Prefer less busy
+                    .FirstOrDefault();
+                if (suitableSpecialist != null) return suitableSpecialist;
+            }
+
+            // 3. Try any suitable doctor with capacity
+            var anySuitableDoctor = DoctorsById.Values
+                .Where(d => currentWorkloads.ContainsKey(d.Id) && // Ensure doctor is in workload dict
+                            currentWorkloads[d.Id] < d.MaxWorkload &&
+                            d.IsSuitableFor(patient))
+                .OrderBy(d => currentWorkloads[d.Id]) // Prefer less busy
+                .FirstOrDefault();
+
+            return anySuitableDoctor; // Can be null if no suitable doctor found
         }
         #endregion
 
         #region Selection Methods
+        /// <summary>
+        /// Selects a schedule using tournament selection.
+        /// </summary>
         private Schedule TournamentSelection()
         {
-            // Select random schedules for the tournament
-            var tournament = Enumerable.Range(0, tournamentSize)
-                .Select(_ => Population[rnd.Next(Population.Count)])
-                .ToList();
+            if (!Population.Any()) return null; // Handle empty population case
 
-            // Return the best schedule from the tournament
-            return tournament
-                .OrderByDescending(ScoreSchedule)
-                .First();
+            Schedule bestInTournament = null;
+            double bestFitnessInTournament = double.MinValue;
+
+            for (int i = 0; i < tournamentSize; i++)
+            {
+                Schedule candidate = Population[rnd.Next(Population.Count)];
+                if (candidate.FitnessScore > bestFitnessInTournament)
+                {
+                    bestFitnessInTournament = candidate.FitnessScore;
+                    bestInTournament = candidate;
+                }
+            }
+            // Return the best found in the tournament, or a random one if all somehow had MinValue fitness
+            return bestInTournament ?? Population[rnd.Next(Population.Count)];
         }
 
+        /// <summary>
+        /// Gets the schedule with the highest fitness score from the current population.
+        /// </summary>
         private Schedule GetLeadingSchedule()
         {
-            return Population
-                .OrderByDescending(ScoreSchedule)
-                .FirstOrDefault();
+            if (!Population.Any()) return null;
+            return Population.OrderByDescending(s => s.FitnessScore).First();
         }
         #endregion
 
         #region Crossover Implementation
+        /// <summary>
+        /// Performs crossover between two parent schedules to create two offspring.
+        /// Uses a single point crossover on the list of patients.
+        /// </summary>
         private List<Schedule> Crossover(Schedule parent1, Schedule parent2)
         {
-            // Create two offspring
-            var offspring1 = new Schedule
-            {
-                DoctorToPatients = new Dictionary<int, List<int>>(),
-                PatientToDoctor = new Dictionary<int, int>()
-            };
+            var offspring1 = new Schedule();
+            var offspring2 = new Schedule();
+            // Recalculate workloads based on parents for capacity checks during crossover
+            var offspring1Workloads = RecalculateWorkloads(parent1); // Start with parent1's load
+            var offspring2Workloads = RecalculateWorkloads(parent2); // Start with parent2's load
 
-            var offspring2 = new Schedule
-            {
-                DoctorToPatients = new Dictionary<int, List<int>>(),
-                PatientToDoctor = new Dictionary<int, int>()
-            };
 
-            // Reset doctor workloads
-            foreach (var doctor in DoctorsById.Values)
+            // Consider all patients assigned in either parent
+            var patientsToProcess = parent1.PatientToDoctor.Keys
+                                     .Union(parent2.PatientToDoctor.Keys)
+                                     .Distinct()
+                                     .ToList();
+
+            // Simple single crossover point
+            int crossoverPoint = patientsToProcess.Any() ? rnd.Next(patientsToProcess.Count) : 0;
+
+            for (int i = 0; i < patientsToProcess.Count; i++)
             {
-                doctor.Workload = 0;
+                int patientId = patientsToProcess[i];
+
+                // Determine which parent contributes the gene (assignment)
+                Schedule source1 = (i < crossoverPoint) ? parent1 : parent2;
+                Schedule source2 = (i < crossoverPoint) ? parent2 : parent1;
+
+                // Try assigning for offspring 1
+                TryAssignFromSource(source1, offspring1, offspring1Workloads, patientId);
+                // Try assigning for offspring 2
+                TryAssignFromSource(source2, offspring2, offspring2Workloads, patientId);
             }
 
-            // Get all patients that have been assigned in either parent
-            var allAssignedPatients = parent1.PatientToDoctor.Keys
-                .Union(parent2.PatientToDoctor.Keys)
-                .OrderBy(id => PatientsById[id].GetUrgencyValue())
-                .ThenBy(_ => rnd.Next()) // Random order for same urgency
-                .ToList();
-
-            // Crossover point - can vary for different offspring
-            int crossoverPoint = rnd.Next(allAssignedPatients.Count);
-
-            for (int i = 0; i < allAssignedPatients.Count; i++)
-            {
-                int patientId = allAssignedPatients[i];
-
-                // For offspring1: take from parent1 up to crossover point, then from parent2
-                TryCrossoverAssignment(parent1, parent2, offspring1, patientId, i < crossoverPoint);
-
-                // For offspring2: take from parent2 up to crossover point, then from parent1
-                TryCrossoverAssignment(parent2, parent1, offspring2, patientId, i < crossoverPoint);
-            }
-
-            // Try to assign remaining patients
-            AssignRemainingPatients(offspring1);
-            AssignRemainingPatients(offspring2);
+            // Optional: Try assigning any remaining unassigned patients
+            // Note: Workloads used here might not be fully accurate after crossover swaps
+            AssignRemainingPatients(offspring1, RecalculateWorkloads(offspring1));
+            AssignRemainingPatients(offspring2, RecalculateWorkloads(offspring2));
 
             return new List<Schedule> { offspring1, offspring2 };
         }
 
-        private void TryCrossoverAssignment(Schedule primaryParent, Schedule secondaryParent, Schedule offspring, int patientId, bool useFirstParent)
+        /// <summary>
+        /// Helper for crossover: Tries to assign a patient to an offspring from a source parent.
+        /// Updates the temporary workload dictionary for the offspring.
+        /// </summary>
+        private void TryAssignFromSource(Schedule source, Schedule offspring, Dictionary<int, int> offspringWorkloads, int patientId)
         {
-            Schedule sourceParent = useFirstParent ? primaryParent : secondaryParent;
+            // Ensure patient isn't already assigned in offspring
+            if (offspring.PatientToDoctor.ContainsKey(patientId)) return;
 
-            if (sourceParent.PatientToDoctor.TryGetValue(patientId, out int doctorId))
+            if (source.PatientToDoctor.TryGetValue(patientId, out int doctorId) &&
+                DoctorsById.TryGetValue(doctorId, out Doctor doctor) &&
+                offspringWorkloads.TryGetValue(doctorId, out int currentLoad) && // Check if doctor exists in workload dict
+                currentLoad < doctor.MaxWorkload)
             {
-                // Check if this doctor can still take on patients
-                if (DoctorsById.TryGetValue(doctorId, out Doctor doctor) && doctor.Workload < doctor.MaxWorkload)
-                {
-                    AssignPatientToDoctor(offspring, patientId, doctorId);
-                }
-                else if (!useFirstParent && primaryParent.PatientToDoctor.TryGetValue(patientId, out int altDoctorId))
-                {
-                    // Try alternative from other parent as fallback
-                    if (DoctorsById.TryGetValue(altDoctorId, out Doctor altDoctor) && altDoctor.Workload < altDoctor.MaxWorkload)
-                    {
-                        AssignPatientToDoctor(offspring, patientId, altDoctorId);
-                    }
-                }
+                AssignPatientToDoctor(offspring, patientId, doctorId);
+                offspringWorkloads[doctorId]++; // Increment workload count
             }
+            // If assignment fails (e.g., doctor full), patient remains unassigned for now
         }
         #endregion
 
         #region Mutation Implementation
+        /// <summary>
+        /// Applies a random mutation strategy to a schedule.
+        /// </summary>
         private void Mutate(Schedule schedule)
         {
-            // Pick a mutation strategy based on the schedule's state
-            int mutationType = rnd.Next(4);
+            // Recalculate current workloads for this specific schedule before mutating
+            var currentWorkloads = RecalculateWorkloads(schedule);
+
+            int mutationType = rnd.Next(5); // Added new types
 
             switch (mutationType)
             {
-                case 0: // Reassign patients to better match specialization
-                    MutateForSpecialization(schedule);
-                    break;
-                case 1: // Balance workloads
-                    MutateForWorkloadBalance(schedule);
-                    break;
-                case 2: // Improve continuity of care
-                    MutateForContinuity(schedule);
-                    break;
-                case 3: // Add unassigned patients 
-                    MutateAddUnassignedPatients(schedule);
-                    break;
+                case 0: MutateReassignPatient(schedule, currentWorkloads); break; // Simple reassign
+                case 1: MutateForWorkloadBalance(schedule, currentWorkloads); break;
+                case 2: MutateForContinuity(schedule, currentWorkloads); break; // Corrected version below
+                case 3: MutateAddUnassignedPatients(schedule, currentWorkloads); break;
+                case 4: MutateOptimizePreferences(schedule, currentWorkloads); break;
             }
         }
 
-        private void MutateForSpecialization(Schedule schedule)
+        // --- Other Mutation Methods (MutateReassignPatient, MutateForWorkloadBalance, etc. - keep as before) ---
+
+        /// <summary>
+        /// Mutation: Randomly reassigns a single patient to a different suitable doctor.
+        /// </summary>
+        private void MutateReassignPatient(Schedule schedule, Dictionary<int, int> currentWorkloads)
         {
-            // Find patients assigned to doctors with wrong specialization
-            var mismatchedAssignments = schedule.PatientToDoctor
-                .Where(kvp => {
-                    var patient = PatientsById[kvp.Key];
-                    var doctor = DoctorsById[kvp.Value];
-                    return doctor.Specialization != patient.RequiredSpecialization;
-                })
-                .OrderBy(_ => rnd.Next()) // Randomize which ones we try to fix
-                .Take(3) // Limit mutations to a few at a time
+            if (!schedule.PatientToDoctor.Any()) return;
+
+            // Select a random assigned patient
+            var patientAssignmentList = schedule.PatientToDoctor.ToList(); // Avoid modifying while iterating indirectly
+            var patientAssignment = patientAssignmentList[rnd.Next(patientAssignmentList.Count)];
+            int patientId = patientAssignment.Key;
+            int currentDoctorId = patientAssignment.Value;
+
+            if (!PatientsById.TryGetValue(patientId, out var patient)) return; // Safety check
+
+            // Find other suitable doctors with capacity
+            var potentialDoctors = DoctorsById.Values
+                .Where(d => d.Id != currentDoctorId &&
+                            currentWorkloads.ContainsKey(d.Id) && // Ensure doctor is trackable
+                            currentWorkloads[d.Id] < d.MaxWorkload &&
+                            d.IsSuitableFor(patient))
                 .ToList();
 
-            foreach (var assignment in mismatchedAssignments)
+            if (potentialDoctors.Any())
             {
-                int patientId = assignment.Key;
-                int currentDoctorId = assignment.Value;
-                var patient = PatientsById[patientId];
-
-                // Look for available doctors with matching specialization
-                if (DoctorsBySpecialization.TryGetValue(patient.RequiredSpecialization, out List<Doctor> specialists))
-                {
-                    var availableSpecialist = specialists
-                        .Where(d => d.Id != currentDoctorId && d.Workload < d.MaxWorkload)
-                        .OrderBy(d => d.Workload)
-                        .FirstOrDefault();
-
-                    if (availableSpecialist != null)
-                    {
-                        // Remove current assignment and reassign
-                        RemovePatientAssignment(schedule, patientId);
-                        AssignPatientToDoctor(schedule, patientId, availableSpecialist.Id);
-                    }
-                }
-            }
-        }
-
-        private void MutateForWorkloadBalance(Schedule schedule)
-        {
-            // Identify overworked and underworked doctors
-            var doctorWorkloads = schedule.DoctorToPatients
-                .Select(kvp => new {
-                    DoctorId = kvp.Key,
-                    Doctor = DoctorsById[kvp.Key],
-                    Workload = kvp.Value.Count,
-                    WorkloadPercent = (double)kvp.Value.Count / DoctorsById[kvp.Key].MaxWorkload
-                })
-                .ToList();
-
-            if (doctorWorkloads.Count < 2) return; // Need at least two doctors to balance
-
-            var overworkedDocs = doctorWorkloads
-                .OrderByDescending(d => d.WorkloadPercent)
-                .Take(2)
-                .ToList();
-
-            var underworkedDocs = doctorWorkloads
-                .OrderBy(d => d.WorkloadPercent)
-                .Take(2)
-                .ToList();
-
-            // Try to balance by moving some patients
-            foreach (var overworked in overworkedDocs)
-            {
-                foreach (var underworked in underworkedDocs)
-                {
-                    if (overworked.WorkloadPercent - underworked.WorkloadPercent < 0.2)
-                        continue; // Skip if difference is small
-
-                    // Find a patient from overworked doctor that underworked doctor can handle
-                    var transferablePatients = schedule.DoctorToPatients[overworked.DoctorId]
-                        .Where(patientId => {
-                            var patient = PatientsById[patientId];
-                            // Prioritize patients that match the underworked doctor's specialization
-                            return (underworked.Doctor.Specialization == patient.RequiredSpecialization) &&
-                                   (underworked.Doctor.ExperienceLevel >= GetRequiredExperienceLevel(patient.Urgency));
-                        })
-                        .OrderBy(_ => rnd.Next())
-                        .Take(1)
-                        .ToList();
-
-                    foreach (var patientId in transferablePatients)
-                    {
-                        RemovePatientAssignment(schedule, patientId);
-                        AssignPatientToDoctor(schedule, patientId, underworked.DoctorId);
-                    }
-                }
-            }
-        }
-
-        private void MutateForContinuity(Schedule schedule)
-        {
-            // Improve continuity of care by reassigning patients to previous doctors
-            var potentialContinuityImprovements = schedule.PatientToDoctor
-                .Where(kvp =>
-                    previousAssignments.TryGetValue(kvp.Key, out int prevDoc) &&
-                    prevDoc != kvp.Value &&
-                    DoctorsById.ContainsKey(prevDoc) &&
-                    DoctorsById[prevDoc].Workload < DoctorsById[prevDoc].MaxWorkload)
-                .OrderBy(_ => rnd.Next())
-                .Take(2)
-                .ToList();
-
-            foreach (var assignment in potentialContinuityImprovements)
-            {
-                int patientId = assignment.Key;
-                int prevDoctorId = previousAssignments[patientId];
-
+                // Choose a random new doctor from the suitable ones
+                var newDoctor = potentialDoctors[rnd.Next(potentialDoctors.Count)];
+                // Remove old assignment and add new one
                 RemovePatientAssignment(schedule, patientId);
-                AssignPatientToDoctor(schedule, patientId, prevDoctorId);
+                AssignPatientToDoctor(schedule, patientId, newDoctor.Id);
+                // Note: Workloads are conceptually updated by Assign/Remove, no need to update currentWorkloads dict here
             }
         }
 
-        private void MutateAddUnassignedPatients(Schedule schedule)
+        /// <summary>
+        /// Mutation: Tries to move a patient from an overworked doctor to an underworked one.
+        /// </summary>
+        private void MutateForWorkloadBalance(Schedule schedule, Dictionary<int, int> currentWorkloads)
         {
-            // Add unassigned patients to the schedule
-            var assignedPatientIds = new HashSet<int>(schedule.PatientToDoctor.Keys);
-            var unassignedPatients = PatientsById.Values
-                .Where(p => !p.NeedsSurgery && !assignedPatientIds.Contains(p.Id))
-                .OrderByDescending(p => p.GetUrgencyValue())
-                .ThenBy(_ => rnd.Next())
-                .Take(3)
+            var doctors = DoctorsById.Values.ToList();
+            if (doctors.Count < 2) return;
+
+            // Find most and least loaded doctors (considering MaxWorkload)
+            var sortedByLoad = doctors
+                .Where(d => currentWorkloads.ContainsKey(d.Id)) // Only consider doctors with assignments or potential
+                .OrderBy(d => d.MaxWorkload == 0 ? double.MaxValue : (double)currentWorkloads[d.Id] / d.MaxWorkload) // Handle MaxWorkload=0
                 .ToList();
 
-            foreach (var patient in unassignedPatients)
+            if (sortedByLoad.Count < 2) return; // Need at least two doctors with workloads
+
+            var leastLoaded = sortedByLoad.First();
+            var mostLoaded = sortedByLoad.Last();
+
+            // Only attempt if there's a significant difference and space available
+            if (mostLoaded.Id == leastLoaded.Id || !schedule.DoctorToPatients.ContainsKey(mostLoaded.Id)) return;
+
+            double mostLoadPercent = mostLoaded.MaxWorkload == 0 ? 1.0 : (double)currentWorkloads[mostLoaded.Id] / mostLoaded.MaxWorkload;
+            double leastLoadPercent = leastLoaded.MaxWorkload == 0 ? 1.0 : (double)currentWorkloads[leastLoaded.Id] / leastLoaded.MaxWorkload;
+            double loadDiff = mostLoadPercent - leastLoadPercent;
+
+
+            if (loadDiff > 0.2 && currentWorkloads[leastLoaded.Id] < leastLoaded.MaxWorkload) // Threshold difference
             {
-                // Find a suitable doctor with capacity
-                Doctor selectedDoctor = null;
+                // Find a patient assigned to the most loaded doctor that the least loaded can take
+                var transferablePatientId = schedule.DoctorToPatients[mostLoaded.Id]
+                    .Select(pid => PatientsById.TryGetValue(pid, out var p) ? p : null) // Get patient object safely
+                    .Where(p => p != null && leastLoaded.IsSuitableFor(p)) // Check suitability
+                    .OrderBy(_ => rnd.Next()) // Random choice among suitable patients
+                    .Select(p => p.Id)
+                    .FirstOrDefault(); // Get the ID
 
-                // First try a doctor with matching specialization
-                if (DoctorsBySpecialization.TryGetValue(patient.RequiredSpecialization, out List<Doctor> specialists))
+                if (transferablePatientId != 0) // Check if a patient was found
                 {
-                    selectedDoctor = specialists
-                        .Where(d => d.Workload < d.MaxWorkload)
-                        .OrderBy(d => d.Workload)
-                        .FirstOrDefault();
+                    RemovePatientAssignment(schedule, transferablePatientId);
+                    AssignPatientToDoctor(schedule, transferablePatientId, leastLoaded.Id);
                 }
+            }
+        }
 
-                // If no matching specialist is available, try any doctor with capacity
-                if (selectedDoctor == null)
-                {
-                    selectedDoctor = DoctorsById.Values
-                        .Where(d => d.Workload < d.MaxWorkload)
-                        .OrderBy(d => d.Workload)
-                        .FirstOrDefault();
-                }
+        /// <summary>
+        /// Mutation: Tries to assign a patient back to their previous doctor if possible.
+        /// *** CORRECTED VERSION ***
+        /// </summary>
+        private void MutateForContinuity(Schedule schedule, Dictionary<int, int> currentWorkloads)
+        {
+            var candidates = schedule.PatientToDoctor
+                .Select(kvp => new { PatientId = kvp.Key, CurrentDoctorId = kvp.Value }) // Select relevant data
+                .Where(item =>
+                    // Check if a previous assignment exists for this patient
+                    previousAssignments.TryGetValue(item.PatientId, out int prevDocId) &&
+                    // Ensure the previous doctor is different from the current one
+                    prevDocId != item.CurrentDoctorId &&
+                    // Ensure the previous doctor exists in our main list and workload tracking
+                    DoctorsById.TryGetValue(prevDocId, out Doctor prevDoctor) &&
+                    currentWorkloads.ContainsKey(prevDocId) &&
+                    // Ensure the previous doctor has capacity
+                    currentWorkloads[prevDocId] < prevDoctor.MaxWorkload &&
+                    // Ensure the previous doctor is suitable for the patient
+                    prevDoctor.IsSuitableFor(PatientsById[item.PatientId]))
+                .OrderBy(_ => rnd.Next())
+                .Take(1) // Try one at random
+                .ToList(); // Execute the query
 
-                if (selectedDoctor != null)
+            // The 'candidates' list now contains items where all conditions were met
+
+            foreach (var candidate in candidates)
+            {
+                int patientId = candidate.PatientId;
+                // Safely get the previous doctor ID again (it's guaranteed to exist here)
+                if (previousAssignments.TryGetValue(patientId, out int doctorToAssign))
                 {
-                    AssignPatientToDoctor(schedule, patient.Id, selectedDoctor.Id);
+                    Console.WriteLine($"MutateContinuity: Moving P{patientId} back to previous Dr{doctorToAssign}");
+                    RemovePatientAssignment(schedule, patientId);
+                    AssignPatientToDoctor(schedule, patientId, doctorToAssign);
                 }
+            }
+        }
+
+
+        /// <summary>
+        /// Mutation: Tries to assign currently unassigned patients.
+        /// </summary>
+        private void MutateAddUnassignedPatients(Schedule schedule, Dictionary<int, int> currentWorkloads)
+        {
+            var assignedPatientIds = new HashSet<int>(schedule.PatientToDoctor.Keys);
+            var unassigned = PatientsById.Values
+                .Where(p => !p.NeedsSurgery && !assignedPatientIds.Contains(p.Id))
+                .OrderByDescending(p => (int)p.Urgency) // Prioritize higher urgency
+                .ThenBy(_ => rnd.Next())
+                .Take(2) // Try to add a couple
+                .ToList();
+
+            foreach (var patient in unassigned)
+            {
+                var suitableDoctor = FindBestInitialDoctorForPatient(patient, currentWorkloads); // Reuse initial assignment logic
+                if (suitableDoctor != null)
+                {
+                    AssignPatientToDoctor(schedule, patient.Id, suitableDoctor.Id);
+                    currentWorkloads[suitableDoctor.Id]++; // Update local workload count
+                }
+            }
+        }
+
+        /// <summary>
+        /// Mutation: Tries to improve preference matching by swapping patients.
+        /// </summary>
+        private void MutateOptimizePreferences(Schedule schedule, Dictionary<int, int> currentWorkloads)
+        {
+            if (schedule.PatientToDoctor.Count < 2) return; // Need at least two assignments to swap
+
+            // Get assignments as a list to pick random indices
+            var assignments = schedule.PatientToDoctor.ToList();
+
+            // Select two distinct random assignments
+            int index1 = rnd.Next(assignments.Count);
+            int index2 = rnd.Next(assignments.Count);
+            if (index1 == index2) index2 = (index1 + 1) % assignments.Count; // Ensure distinct if possible
+
+            var assignment1 = assignments[index1];
+            var assignment2 = assignments[index2];
+
+
+            int patient1Id = assignment1.Key;
+            int doctor1Id = assignment1.Value;
+            int patient2Id = assignment2.Key;
+            int doctor2Id = assignment2.Value;
+
+            // Ensure we have valid data
+            if (!PatientsById.TryGetValue(patient1Id, out var patient1) ||
+                !DoctorsById.TryGetValue(doctor1Id, out var doctor1) ||
+                !PatientsById.TryGetValue(patient2Id, out var patient2) ||
+                !DoctorsById.TryGetValue(doctor2Id, out var doctor2))
+            {
+                return; // Skip if data is missing
+            }
+
+
+            // Calculate current preference scores
+            double currentScore1 = CalculatePreferenceScoreForPair(doctor1, patient1);
+            double currentScore2 = CalculatePreferenceScoreForPair(doctor2, patient2);
+
+            // Calculate potential preference scores if swapped
+            double potentialScore1 = CalculatePreferenceScoreForPair(doctor1, patient2);
+            double potentialScore2 = CalculatePreferenceScoreForPair(doctor2, patient1);
+
+            // Check if swapping improves the *total* preference score AND if doctors are suitable for the swapped patient
+            if ((potentialScore1 + potentialScore2 > currentScore1 + currentScore2) &&
+                doctor1.IsSuitableFor(patient2) && doctor2.IsSuitableFor(patient1))
+            {
+                Console.WriteLine($"MutatePreference: Swapping P{patient1Id}(Dr{doctor1Id}) and P{patient2Id}(Dr{doctor2Id})");
+                // Perform the swap
+                RemovePatientAssignment(schedule, patient1Id);
+                RemovePatientAssignment(schedule, patient2Id);
+                AssignPatientToDoctor(schedule, patient1Id, doctor2Id);
+                AssignPatientToDoctor(schedule, patient2Id, doctor1Id);
             }
         }
         #endregion
 
         #region Utility Methods
-        private void AssignRemainingPatients(Schedule schedule)
-        {
-            // Get urgent patients that haven't been assigned yet
-            var assignedPatientIds = new HashSet<int>(schedule.PatientToDoctor.Keys);
 
-            var urgentUnassignedPatients = PatientsById.Values
-                .Where(p => !p.NeedsSurgery && !assignedPatientIds.Contains(p.Id) && p.GetUrgencyValue() >= 2)
-                .OrderByDescending(p => p.GetUrgencyValue())
-                .ThenBy(_ => rnd.Next())
+        /// <summary>
+        /// Recalculates the current workload for each doctor based on a given schedule.
+        /// Initializes workload for doctors even if they have no assignments in this schedule.
+        /// </summary>
+        private Dictionary<int, int> RecalculateWorkloads(Schedule schedule)
+        {
+            // Start with all doctors having 0 workload
+            var workloads = DoctorsById.Keys.ToDictionary(id => id, id => 0);
+            // Count assignments from the schedule
+            foreach (var patientId in schedule.PatientToDoctor.Keys)
+            {
+                int doctorId = schedule.PatientToDoctor[patientId];
+                if (workloads.ContainsKey(doctorId))
+                {
+                    workloads[doctorId]++;
+                }
+                else
+                {
+                    // This case should ideally not happen if Patients are only assigned to known DoctorsById
+                    // Log warning or handle appropriately
+                }
+            }
+            return workloads;
+        }
+
+
+        /// <summary>
+        /// Assigns currently unassigned patients if possible. Used after crossover.
+        /// </summary>
+        private void AssignRemainingPatients(Schedule schedule, Dictionary<int, int> currentWorkloads)
+        {
+            var assignedPatientIds = new HashSet<int>(schedule.PatientToDoctor.Keys);
+            var unassigned = PatientsById.Values
+                .Where(p => !p.NeedsSurgery && !assignedPatientIds.Contains(p.Id))
+                .OrderByDescending(p => (int)p.Urgency)
                 .ToList();
 
-            foreach (var patient in urgentUnassignedPatients)
+            foreach (var patient in unassigned)
             {
-                // Try specialists first
-                List<Doctor> potentialDoctors = null;
-
-                if (DoctorsBySpecialization.TryGetValue(patient.RequiredSpecialization, out List<Doctor> specialists))
+                var suitableDoctor = FindBestInitialDoctorForPatient(patient, currentWorkloads);
+                if (suitableDoctor != null)
                 {
-                    potentialDoctors = specialists
-                        .Where(d => d.Workload < d.MaxWorkload)
-                        .OrderBy(d => d.Workload)
-                        .ToList();
-                }
-
-                // If no specialists available, try any doctor
-                if (potentialDoctors == null || !potentialDoctors.Any())
-                {
-                    potentialDoctors = DoctorsById.Values
-                        .Where(d => d.Workload < d.MaxWorkload)
-                        .OrderBy(d => d.Workload)
-                        .ToList();
-                }
-
-                if (potentialDoctors.Any())
-                {
-                    AssignPatientToDoctor(schedule, patient.Id, potentialDoctors.First().Id);
+                    // Double-check capacity before assigning
+                    if (currentWorkloads[suitableDoctor.Id] < suitableDoctor.MaxWorkload)
+                    {
+                        AssignPatientToDoctor(schedule, patient.Id, suitableDoctor.Id);
+                        currentWorkloads[suitableDoctor.Id]++;
+                    }
                 }
             }
         }
 
+        /// <summary>
+        /// Assigns a patient to a doctor within a schedule, updating mappings.
+        /// NOTE: Does NOT update the shared Doctor.Workload property directly. Workloads should be recalculated per schedule.
+        /// </summary>
         private void AssignPatientToDoctor(Schedule schedule, int patientId, int doctorId)
         {
-            // If the patient is already assigned to a doctor, remove them from that doctor's list
-            if (schedule.PatientToDoctor.ContainsKey(patientId))
-            {
-                RemovePatientAssignment(schedule, patientId);
-            }
-
-            // If the doctor is not already in the schedule, add them
+            // Ensure doctor list exists in the schedule's dictionary
             if (!schedule.DoctorToPatients.ContainsKey(doctorId))
             {
                 schedule.DoctorToPatients[doctorId] = new List<int>();
             }
 
-            // Assign the patient to the doctor
-            schedule.DoctorToPatients[doctorId].Add(patientId);
-            schedule.PatientToDoctor[patientId] = doctorId;
-
-            // Update the doctor's workload
-            if (DoctorsById.TryGetValue(doctorId, out Doctor doctor))
+            // Add assignment (handle potential duplicates if logic allows)
+            if (!schedule.DoctorToPatients[doctorId].Contains(patientId))
             {
-                doctor.Workload++;
+                schedule.DoctorToPatients[doctorId].Add(patientId);
             }
+            schedule.PatientToDoctor[patientId] = doctorId;
         }
 
+        /// <summary>
+        /// Removes a patient's assignment from a schedule, updating mappings.
+        /// NOTE: Does NOT update the shared Doctor.Workload property directly.
+        /// </summary>
         private void RemovePatientAssignment(Schedule schedule, int patientId)
         {
             if (schedule.PatientToDoctor.TryGetValue(patientId, out int currentDoctorId))
             {
-                if (schedule.DoctorToPatients.ContainsKey(currentDoctorId))
+                if (schedule.DoctorToPatients.TryGetValue(currentDoctorId, out var patientList))
                 {
-                    schedule.DoctorToPatients[currentDoctorId].Remove(patientId);
-
-                    // Clean up empty lists
-                    if (!schedule.DoctorToPatients[currentDoctorId].Any())
+                    patientList.Remove(patientId);
+                    if (!patientList.Any())
                     {
-                        schedule.DoctorToPatients.Remove(currentDoctorId);
-                    }
-
-                    // Update the doctor's workload
-                    if (DoctorsById.TryGetValue(currentDoctorId, out Doctor doctor))
-                    {
-                        doctor.Workload = Math.Max(0, doctor.Workload - 1);
+                        schedule.DoctorToPatients.Remove(currentDoctorId); // Clean up empty list
                     }
                 }
-
                 schedule.PatientToDoctor.Remove(patientId);
             }
         }
 
+        /// <summary>
+        /// Calculates the fitness score for a given schedule.
+        /// Higher scores are better.
+        /// </summary>
         private double ScoreSchedule(Schedule schedule)
         {
-            double score = 0;
-
-            // Score for each doctor-patient assignment
-            foreach (var doctorId in schedule.DoctorToPatients.Keys)
+            // Use cached score if available and valid (e.g., > -1)
+            if (schedule.FitnessScore >= 0)
             {
-                if (DoctorsById.TryGetValue(doctorId, out Doctor doctor))
-                {
-                    var patients = schedule.DoctorToPatients[doctorId];
-
-                    // Base score for each patient assigned
-                    score += patients.Count * patientAssignmentWeight;
-
-                    // Workload balance score (penalty for high workload percentage)
-                    double workloadFactor = (double)doctor.Workload / doctor.MaxWorkload;
-                    double workloadScore = (1 - Math.Pow(workloadFactor, 2)) * workloadBalanceWeight * patients.Count;
-                    score += workloadScore;
-
-                    // Score for each patient
-                    foreach (var patientId in patients)
-                    {
-                        if (PatientsById.TryGetValue(patientId, out Patient patient))
-                        {
-                            // Specialization match bonus
-                            if (doctor.Specialization == patient.RequiredSpecialization)
-                            {
-                                score += specializationMatchWeight;
-                            }
-
-                            // Urgency handling bonus
-                            score += patient.GetUrgencyValue() * urgencyWeight;
-
-                            // Experience level appropriate for complexity
-                            int requiredLevel = GetRequiredExperienceLevel(patient.Urgency);
-                            if (doctor.ExperienceLevel >= requiredLevel)
-                            {
-                                score += experienceLevelWeight;
-
-                                // Additional bonus if the doctor is at the perfect level (not overqualified)
-                                if (doctor.ExperienceLevel == requiredLevel)
-                                {
-                                    score += hierarchyWeight;
-                                }
-                            }
-
-                            // Continuity of care bonus
-                            if (previousAssignments.TryGetValue(patientId, out int prevDoctorId) && prevDoctorId == doctorId)
-                            {
-                                score += continuityOfCareWeight;
-                            }
-                        }
-                    }
-                }
+                return schedule.FitnessScore;
             }
 
+            double score = 0;
+            var currentWorkloads = RecalculateWorkloads(schedule); // Get accurate workloads for this schedule
+
+            // --- Score each assignment ---
+            foreach (var assignment in schedule.PatientToDoctor)
+            {
+                int patientId = assignment.Key;
+                int doctorId = assignment.Value;
+
+                if (!PatientsById.TryGetValue(patientId, out Patient patient) ||
+                    !DoctorsById.TryGetValue(doctorId, out Doctor doctor))
+                {
+                    continue; // Skip if data is missing
+                }
+
+                // 1. Base score for assignment
+                score += patientAssignmentWeight;
+
+                // 2. Specialization Match Bonus
+                if (doctor.Specialization == patient.RequiredSpecialization)
+                {
+                    score += specializationMatchWeight;
+                }
+                else
+                {
+                    score -= specializationMatchWeight; // Penalty for mismatch
+                }
+
+                // 3. Urgency Bonus (Higher urgency contributes more)
+                score += (int)patient.Urgency * urgencyWeight;
+
+                // 4. Experience Level Bonus/Penalty
+                ExperienceLevel requiredLevel = GetRequiredExperienceLevel(patient.Urgency);
+                if (doctor.ExperienceLevel >= requiredLevel)
+                {
+                    score += experienceLevelWeight; // Meets minimum requirement
+
+                    // 4a. Hierarchy Bonus (Bonus if experience level is an exact match)
+                    if (doctor.ExperienceLevel == requiredLevel)
+                    {
+                        score += hierarchyWeight;
+                    }
+                    // Optional: Slight penalty if significantly overqualified?
+                    // else if (doctor.ExperienceLevel > requiredLevel + 1) { score -= hierarchyWeight * 0.5; }
+                }
+                else
+                {
+                    score -= experienceLevelWeight * 2; // Significant penalty if under-qualified
+                }
+
+
+                // 5. Continuity of Care Bonus
+                if (previousAssignments.TryGetValue(patientId, out int prevDoctorId) && prevDoctorId == doctorId)
+                {
+                    score += continuityOfCareWeight;
+                }
+
+                // 6. Preference Score Bonus
+                score += CalculatePreferenceScoreForPair(doctor, patient) * preferenceMatchWeight;
+
+            } // End loop through assignments
+
+            // --- Score overall workload balance ---
+            double totalWorkloadFactorSquaredSum = 0;
+            int doctorsConsideredForWorkload = 0;
+            foreach (var docId in DoctorsById.Keys) // Consider ALL doctors for balance
+            {
+                if (DoctorsById.TryGetValue(docId, out Doctor doctor) && doctor.MaxWorkload > 0)
+                {
+                    doctorsConsideredForWorkload++;
+                    // Use workload from current schedule, default to 0 if doctor has no assignments
+                    int load = currentWorkloads.TryGetValue(docId, out int currentLoad) ? currentLoad : 0;
+                    double workloadFactor = (double)load / doctor.MaxWorkload;
+                    totalWorkloadFactorSquaredSum += Math.Pow(workloadFactor, 2); // Penalize high loads more
+                }
+            }
+            // Calculate variance or use average squared factor
+            double avgWorkloadFactorSquared = doctorsConsideredForWorkload > 0 ? totalWorkloadFactorSquaredSum / doctorsConsideredForWorkload : 0;
+            // Score is higher when the average squared factor is lower (closer to 0, meaning balanced low load)
+            // Scale by number of doctors to make it somewhat independent of team size
+            score += (1.0 - avgWorkloadFactorSquared) * workloadBalanceWeight * doctorsConsideredForWorkload;
+
+
+            // --- Penalty for unassigned patients ---
+            int unassignedCount = PatientsById.Count(p => !p.Value.NeedsSurgery) - schedule.PatientToDoctor.Count;
+            // Apply a penalty based on urgency of unassigned patients
+            double unassignedPenalty = 0;
+            var assignedIds = new HashSet<int>(schedule.PatientToDoctor.Keys);
+            foreach (var patient in PatientsById.Values)
+            {
+                if (!patient.NeedsSurgery && !assignedIds.Contains(patient.Id))
+                {
+                    unassignedPenalty += (int)patient.Urgency * urgencyWeight * 1.5; // Heavier penalty for unassigned urgent
+                }
+            }
+            score -= unassignedPenalty;
+
+
+            // Cache the calculated score
+            schedule.FitnessScore = score;
             return score;
         }
 
+        /// <summary>
+        /// Calculates the preference match score (0 to 1) for a single doctor-patient pair.
+        /// </summary>
+        private double CalculatePreferenceScoreForPair(Doctor doctor, Patient patient)
+        {
+            if (doctor.Preferences == null || !doctor.Preferences.Any())
+            {
+                return 0.5; // Neutral score if doctor has no preferences defined
+            }
+
+            double totalScore = 0;
+            int relevantPreferenceCount = 0;
+
+            foreach (var preference in doctor.Preferences)
+            {
+                double currentPrefScore = -1; // Indicates not evaluated yet for this preference rule
+
+                try // Add try-catch for safety during preference evaluation
+                {
+                    if (preference.Type == PreferenceType.PatientComplexity && preference.LevelValue.HasValue)
+                    {
+                        relevantPreferenceCount++;
+                        ComplexityLevel patientLevel = patient.ComplexityLevel;
+                        ComplexityLevel prefLevel = (ComplexityLevel)preference.LevelValue.Value;
+
+                        if (preference.Direction == PreferenceDirection.Prefers)
+                            currentPrefScore = (patientLevel == prefLevel) ? 1.0 : 0.2; // High score for match, low otherwise
+                        else // Avoids
+                            currentPrefScore = (patientLevel == prefLevel) ? 0.0 : 0.8; // Low score for match, high otherwise
+                    }
+                    else if (preference.Type == PreferenceType.PatientUrgency && preference.LevelValue.HasValue)
+                    {
+                        relevantPreferenceCount++;
+                        UrgencyLevel patientLevel = patient.Urgency;
+                        UrgencyLevel prefLevel = (UrgencyLevel)preference.LevelValue.Value;
+
+                        if (preference.Direction == PreferenceDirection.Prefers)
+                            currentPrefScore = (patientLevel == prefLevel) ? 1.0 : 0.2;
+                        else // Avoids
+                            currentPrefScore = (patientLevel == prefLevel) ? 0.0 : 0.8;
+                    }
+                    else if (preference.Type == PreferenceType.PatientCondition && !string.IsNullOrEmpty(preference.ConditionValue))
+                    {
+                        relevantPreferenceCount++;
+                        bool conditionMatch = (patient.Condition != null &&
+                                              patient.Condition.Equals(preference.ConditionValue, StringComparison.OrdinalIgnoreCase));
+
+                        if (preference.Direction == PreferenceDirection.Prefers)
+                            currentPrefScore = conditionMatch ? 1.0 : 0.2;
+                        else // Avoids
+                            currentPrefScore = conditionMatch ? 0.0 : 0.8;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Log error if preference evaluation fails (e.g., bad LevelValue cast)
+                    Console.WriteLine($"Error evaluating preference: {ex.Message}");
+                    currentPrefScore = 0.5; // Assign neutral score on error
+                    if (relevantPreferenceCount == 0) relevantPreferenceCount = 1; // Avoid division by zero if error on first pref
+                }
+
+
+                if (currentPrefScore >= 0) // If the preference was relevant and evaluated
+                {
+                    totalScore += currentPrefScore;
+                }
+                // If preference type wasn't relevant to this patient, relevantPreferenceCount is not incremented
+            }
+
+            // Return average score, defaulting to neutral if no relevant preferences applied
+            return (relevantPreferenceCount == 0) ? 0.5 : totalScore / relevantPreferenceCount;
+        }
+
+
+        /// <summary>
+        /// Helper to determine required experience based on patient urgency enum.
+        /// </summary>
+        private ExperienceLevel GetRequiredExperienceLevel(UrgencyLevel urgency)
+        {
+            switch (urgency)
+            {
+                case UrgencyLevel.High: return ExperienceLevel.Senior;
+                case UrgencyLevel.Medium: return ExperienceLevel.Regular;
+                default: return ExperienceLevel.Junior; // Low urgency
+            }
+        }
+
+        /// <summary>
+        /// Creates a deep clone of a schedule object.
+        /// </summary>
         private Schedule CloneSchedule(Schedule original)
         {
+            if (original == null) return new Schedule(); // Handle null input
+
             var clone = new Schedule
             {
-                DoctorToPatients = new Dictionary<int, List<int>>(),
-                PatientToDoctor = new Dictionary<int, int>()
+                FitnessScore = original.FitnessScore // Copy fitness score too
             };
-
-            // Deep copy of DoctorToPatients
-            foreach (var pair in original.DoctorToPatients)
+            // Deep copy dictionaries
+            foreach (var kvp in original.DoctorToPatients)
             {
-                clone.DoctorToPatients[pair.Key] = new List<int>(pair.Value);
+                clone.DoctorToPatients[kvp.Key] = new List<int>(kvp.Value);
             }
-
-            // Copy PatientToDoctor
-            foreach (var pair in original.PatientToDoctor)
+            foreach (var kvp in original.PatientToDoctor)
             {
-                clone.PatientToDoctor[pair.Key] = pair.Value;
+                clone.PatientToDoctor[kvp.Key] = kvp.Value;
             }
-
             return clone;
         }
 
-        private int GetRequiredExperienceLevel(string urgency)
-        {
-            switch (urgency.ToLower())
-            {
-                case "high": return 3; // High urgency requires senior doctors
-                case "medium": return 2; // Medium urgency requires at least regular doctors
-                default: return 1; // Low urgency can be handled by any doctor
-            }
-        }
-
+        /// <summary>
+        /// Checks if the termination conditions for the algorithm have been met.
+        /// </summary>
         private bool TerminationConditionMet()
         {
-            // Condition 1: Maximum generations reached
-            if (currentGeneration >= maxGenerations)
-            {
-                Console.WriteLine("Termination: Maximum generations reached.");
-                return true;
-            }
-
-            // Condition 2: Fitness threshold met
-            if (bestFitness >= fitnessThreshold)
-            {
-                Console.WriteLine("Termination: Fitness threshold reached.");
-                return true;
-            }
-
-            // Condition 3: Stagnation (no improvement for too long)
-            if (stagnationCount >= maxStagnation)
-            {
-                Console.WriteLine("Termination: Stagnation detected.");
-                return true;
-            }
-
+            if (!Population.Any()) { Console.WriteLine("Termination: Population empty."); return true; } // Stop if population dies out
+            if (currentGeneration >= maxGenerations) { Console.WriteLine("Termination: Max generations reached."); return true; }
+            if (bestFitness >= fitnessThreshold) { Console.WriteLine("Termination: Fitness threshold reached."); return true; }
+            if (stagnationCount >= maxStagnation) { Console.WriteLine("Termination: Stagnation detected."); return true; }
             return false;
         }
 
-        private void PrintScheduleDetails(Schedule schedule)
+        /// <summary>
+        /// Updates the best fitness score and stagnation count.
+        /// </summary>
+        private void UpdateStagnation(double currentBestFitness)
         {
-            int assignedPatients = schedule.PatientToDoctor.Count;
-            int totalPatientsNeedingDoctor = PatientsById.Values.Count(p => !p.NeedsSurgery);
-            double assignmentPercentage = (double)assignedPatients / totalPatientsNeedingDoctor * 100;
-
-            Console.WriteLine($"Patients assigned: {assignedPatients}/{totalPatientsNeedingDoctor} ({assignmentPercentage:F1}%)");
-
-            // Doctor workload distribution
-            var doctorWorkloads = schedule.DoctorToPatients.Keys
-                .Select(id => new {
-                    DoctorId = id,
-                    Count = schedule.DoctorToPatients[id].Count,
-                    Doctor = DoctorsById[id],
-                    Percentage = (double)schedule.DoctorToPatients[id].Count / DoctorsById[id].MaxWorkload * 100
-                })
-                .ToList();
-
-            if (doctorWorkloads.Any())
+            // Use a small tolerance for comparing floating-point fitness values
+            double tolerance = 1e-6;
+            if (currentBestFitness > bestFitness + tolerance)
             {
-                double minWorkload = doctorWorkloads.Min(d => d.Percentage);
-                double maxWorkload = doctorWorkloads.Max(d => d.Percentage);
-                double avgWorkload = doctorWorkloads.Average(d => d.Percentage);
-                double stdDeviation = Math.Sqrt(doctorWorkloads.Sum(d => Math.Pow(d.Percentage - avgWorkload, 2)) / doctorWorkloads.Count);
-
-                Console.WriteLine($"Doctor workload - Min: {minWorkload:F1}%, Max: {maxWorkload:F1}%, Avg: {avgWorkload:F1}%, StdDev: {stdDeviation:F1}%");
-
-                // Print workload by specialization
-                var specializationWorkloads = doctorWorkloads
-                    .GroupBy(d => d.Doctor.Specialization)
-                    .Select(g => new {
-                        Specialization = g.Key,
-                        AvgWorkload = g.Average(d => d.Percentage),
-                        Count = g.Count()
-                    })
-                    .OrderByDescending(x => x.AvgWorkload)
-                    .ToList();
-
-                Console.WriteLine("Workload by specialization:");
-                foreach (var spec in specializationWorkloads)
+                // previousBestFitness = bestFitness; // Only needed if using relative improvement checks
+                bestFitness = currentBestFitness;
+                stagnationCount = 0; // Reset stagnation counter
+                Console.WriteLine($"Generation {currentGeneration}: Improvement! Best fitness: {bestFitness:F2}");
+                // Optional: Print details of the best schedule periodically
+                if (currentGeneration % 50 == 0) PrintScheduleDetails(GetLeadingSchedule()); // Print less often
+            }
+            else
+            {
+                stagnationCount++;
+                // Only print stagnation message periodically to avoid flooding console
+                if (stagnationCount % 50 == 0 || stagnationCount == maxStagnation) // Print more selectively
                 {
-                    Console.WriteLine($"  {spec.Specialization}: {spec.AvgWorkload:F1}% (from {spec.Count} doctors)");
+                    Console.WriteLine($"Generation {currentGeneration}: No significant improvement. Stagnation: {stagnationCount}/{maxStagnation}. Best Fitness: {bestFitness:F2}");
                 }
             }
         }
+
+        /// <summary>
+        /// Calculates and caches the fitness score for all schedules in the population.
+        /// </summary>
+        private void CalculateFitnessForAll(List<Schedule> population)
+        {
+
+
+             Parallel.ForEach(population, schedule => 
+            {
+                
+                schedule.FitnessScore = -1;
+                ScoreSchedule(schedule); 
+            });
+        }
+
+
+        /// <summary>
+        /// Prints summary details of a given schedule (for debugging/logging).
+        /// </summary>
+        private void PrintScheduleDetails(Schedule schedule)
+        {
+            if (schedule == null) { Console.WriteLine("Cannot print details for null schedule."); return; }
+
+            int assignedPatients = schedule.PatientToDoctor.Count;
+            int totalPatientsNeedingDoctor = PatientsById.Values.Count(p => !p.NeedsSurgery);
+            double assignmentPercentage = totalPatientsNeedingDoctor > 0 ? (double)assignedPatients / totalPatientsNeedingDoctor * 100 : 0;
+
+            Console.WriteLine($"--- Schedule Details (Fitness: {schedule.FitnessScore:F2}) ---");
+            Console.WriteLine($"Patients assigned: {assignedPatients}/{totalPatientsNeedingDoctor} ({assignmentPercentage:F1}%)");
+
+            var currentWorkloads = RecalculateWorkloads(schedule);
+            var doctorDetails = currentWorkloads.Keys
+                .Select(id => DoctorsById.TryGetValue(id, out var doc) ? doc : null)
+                .Where(doc => doc != null)
+                .Select(doc => new {
+                    Doctor = doc,
+                    AssignedCount = currentWorkloads[doc.Id],
+                    Percentage = doc.MaxWorkload > 0 ? (double)currentWorkloads[doc.Id] / doc.MaxWorkload * 100 : 0
+                })
+                .ToList();
+
+            if (doctorDetails.Any())
+            {
+                double minWorkload = doctorDetails.Min(d => d.Percentage);
+                double maxWorkload = doctorDetails.Max(d => d.Percentage);
+                double avgWorkload = doctorDetails.Average(d => d.Percentage);
+                // Calculate StdDev safely
+                double variance = doctorDetails.Count > 1 ? doctorDetails.Sum(d => Math.Pow(d.Percentage - avgWorkload, 2)) / doctorDetails.Count : 0;
+                double stdDeviation = Math.Sqrt(variance);
+
+                Console.WriteLine($"Doctor workload - Min: {minWorkload:F1}%, Max: {maxWorkload:F1}%, Avg: {avgWorkload:F1}%, StdDev: {stdDeviation:F1}%");
+            }
+            else
+            {
+                Console.WriteLine("No doctors have assignments in this schedule.");
+            }
+            Console.WriteLine($"------------------------------------");
+        }
+
+        #endregion
     }
 }
-#endregion

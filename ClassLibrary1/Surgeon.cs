@@ -7,10 +7,10 @@ using System.Threading.Tasks;
 
 namespace ClassLibrary1
 {
-    class Surgeon :Doctor
+    public class Surgeon :Doctor
     {
         public bool IsAvailableForSurgery { get; set; }
 
-        public Dictionary<DayOfWeek, List<TimeSpan>> Availability { get; set; } = new Dictionary<DayOfWeek, List<TimeSpan>>();
+        public List<AvailabilitySlot> Availability { get; set; } = new List<AvailabilitySlot>();
     }
 }
