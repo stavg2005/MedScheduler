@@ -8,71 +8,44 @@ namespace Models
     {
         public int Id { get; set; }
         public string Name { get; set; }
-        public List<string> AvailableEquipment { get; set; } = new List<string>();
-        public bool IsSpecialized { get; set; }
-        public string Specialization { get; set; } // If this is a specialized operating room (e.g., cardiac surgery, neurosurgery)
-        public Dictionary<DayOfWeek, List<TimeRange>> AvailabilityHours { get; set; } = new Dictionary<DayOfWeek, List<TimeRange>>();
+        // public List<string> AvailableEquipment { get; set; } = new List<string>(); // REMOVED
+        // public bool IsSpecialized { get; set; } // REMOVED
+        // public string Specialization { get; set; } // REMOVED
 
+        // Availability and scheduling remain
+        public Dictionary<DayOfWeek, List<TimeRange>> AvailabilityHours { get; set; } = new Dictionary<DayOfWeek, List<TimeRange>>();
         public List<TimeSlot> ScheduledSlots { get; set; } = new List<TimeSlot>();
 
-        // Check if this operating room is suitable for a specific procedure
+        // IsSuitableFor becomes trivial - always true as rooms are generic
         public bool IsSuitableFor(MedicalProcedure procedure)
         {
-            if (procedure == null) return false;
-            // If the room is specialized, check if it matches the procedure's specialization
-            if (IsSpecialized && Specialization != procedure.RequiredSpecialization)
-            {
-                return false;
-            }
-
-            // Check if the room has all required equipment
-            foreach (var equipment in procedure.RequiredEquipment)
-            {
-                if (!AvailableEquipment.Contains(equipment))
-                {
-                    return false;
-                }
-            }
-
-            return true;
+            return true; // All rooms are suitable for all procedures now
         }
 
-        // <summary>
-        /// Finds a specific time slot within the OR's general availability and checks if it's free from scheduled procedures.
-        /// </summary>
-        /// <param name="requiredStart">The desired start time.</param>
-        /// <param name="requiredEnd">The desired end time.</param>
-        /// <returns>True if the slot is potentially available and not already booked, false otherwise.</returns>
+        // Availability check remains the same
         public bool IsSlotGenerallyAvailableAndFree(DateTime requiredStart, DateTime requiredEnd)
         {
             DayOfWeek day = requiredStart.DayOfWeek;
-            TimeSpan startTimeOfDay = requiredStart.TimeOfDay;
-            TimeSpan endTimeOfDay = requiredEnd.TimeOfDay;
+            TimeSpan requiredStartTimeOfDay = requiredStart.TimeOfDay;
+            TimeSpan requiredEndTimeOfDay = requiredEnd.TimeOfDay;
 
-            // 1. Check if the slot falls within the general AvailabilityHours for that day
             bool withinGeneralAvailability = false;
             if (AvailabilityHours.TryGetValue(day, out var availableRanges))
             {
                 foreach (var range in availableRanges)
                 {
-                    // Check if the required slot is fully contained within an available range
-                    if (startTimeOfDay >= range.StartTime && endTimeOfDay <= range.EndTime)
+                    if (requiredStartTimeOfDay >= range.StartTime && requiredEndTimeOfDay <= range.EndTime)
                     {
                         withinGeneralAvailability = true;
                         break;
                     }
                 }
             }
+            if (!withinGeneralAvailability) return false;
 
-            if (!withinGeneralAvailability)
-            {
-                return false; // Not even generally available
-            }
-
-            // 2. Check if the specific slot overlaps with already scheduled slots
             return !ScheduledSlots.Any(slot => slot.Overlaps(requiredStart, requiredEnd));
         }
-    
-        
+
+
     }
 }

@@ -1,4 +1,5 @@
-﻿using System;
+﻿using ClassLibrary1;
+using System;
 using System.Collections.Generic;
 
 namespace Models
@@ -8,16 +9,17 @@ namespace Models
     {
         public int Id { get; set; }
         public string Name { get; set; }
-        public string RequiredSpecialization { get; set; }
+        public string RequiredSpecialization { get; set; } // Still needed for Surgeon matching
         public double EstimatedDuration { get; set; } // In hours
-        public bool IsOperation { get; set; } // Whether this procedure is a surgical operation
-        public int ComplexityLevel { get; set; } // 1-Simple, 2-Moderate, 3-Complex
-        public List<string> RequiredEquipment { get; set; } = new List<string>();
-        public ClassLibrary1.ExperienceLevel MinimumDoctorExperienceLevel { get; set; } // Minimum experience level required to perform this procedure
+        public bool IsOperation { get; set; }
+        public int ComplexityLevel { get; set; }
+        // public List<string> RequiredEquipment { get; set; } = new List<string>(); // REMOVED
+        public ExperienceLevel MinimumDoctorExperienceLevel { get; set; }
 
-        // Check if a doctor is qualified to perform this procedure
+        // Check if a doctor is qualified (no equipment check needed here)
         public bool IsQualified(Doctor doctor)
         {
+            if (doctor == null) return false;
             return doctor.Specialization == RequiredSpecialization &&
                    doctor.ExperienceLevel >= MinimumDoctorExperienceLevel;
         }

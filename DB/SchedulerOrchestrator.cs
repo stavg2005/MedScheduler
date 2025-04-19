@@ -100,6 +100,30 @@ namespace MedScheduler // Or your appropriate namespace
         /// Runs the surgery and doctor assignment scheduling processes.
         /// </summary>
         /// <returns>The final schedule object containing doctor assignments.</returns>
+        /// 
+        private async Task UpdateSingeletonData(Schedule bestSchedule)
+        {
+
+           foreach (var doctor in DataSingelton.Instance.Doctors)
+            {
+                if (bestSchedule.DoctorToPatients.TryGetValue(doctor.Id, out var assignedPatientIDs))
+                {
+                    
+                    doctor.patientsIDS = assignedPatientIDs;
+                }
+                else
+                {
+
+                    doctor.patientsIDS = new List<int>(); 
+                }
+
+                doctor.SetCurrentWorkLoad();
+            }
+
+
+            UpdatePatientsWithDoctorAssignments(bestSchedule);
+
+        }
         public async Task<Schedule> GenerateOptimalSchedule()
         {
             stopwatch.Restart(); // Use Restart instead of Start
@@ -118,33 +142,37 @@ namespace MedScheduler // Or your appropriate namespace
             Console.WriteLine($"\nPatients needing surgery scheduling: {surgeryPatients.Count}");
             Console.WriteLine($"Patients needing doctor assignment: {regularPatients.Count}");
 
-            // --- Step 2: Schedule Surgeries (Greedy Algorithm) ---
-            unscheduledSurgeryPatients = new List<Patient>(); // Initialize
+            // --- Step 2: Schedule Surgeries (Greedy Algorithm for a defined period) ---
+            unscheduledSurgeryPatients = new List<Patient>();
             if (surgeryPatients.Any() && allOperatingRooms.Any() && allProcedures.Any() && allDoctors.OfType<Surgeon>().Any())
             {
                 Console.WriteLine("\n=== Starting Surgery Scheduling (Greedy Algorithm) ===");
+
+                // *** Define the scheduling period (e.g., next 4 weeks) ***
+                DateTime periodStartDate = GetNextMonday(DateTime.Now.Date); // Start from next Monday
+                DateTime periodEndDate = periodStartDate.AddDays(28); // Schedule for 4 weeks (exclusive end date)
+                Console.WriteLine($"Scheduling surgeries from {periodStartDate:yyyy-MM-dd} to {periodEndDate.AddDays(-1):yyyy-MM-dd}");
+
                 var surgeryScheduler = new SurgeryScheduler(
-                    surgeryPatients, // Pass only those needing surgery
-                    allDoctors,      // Pass all doctors (it will filter surgeons)
+                    surgeryPatients,
+                    allDoctors,
                     allOperatingRooms,
-                    allProcedures,   // Pass the procedures list
-                    GetNextMonday(DateTime.Now.Date) // Schedule for next week starting Monday
+                    allProcedures,
+                    periodStartDate, // Pass start date
+                    periodEndDate    // Pass end date
                 );
 
-                // Execute scheduling. This method now MODIFIES the Patient objects in the
-                // 'surgeryPatients' list directly for successful assignments.
-                // It returns the list of patients it FAILED to schedule.
-                unscheduledSurgeryPatients = surgeryScheduler.ScheduleSurgeries();
+                unscheduledSurgeryPatients = surgeryScheduler.ScheduleSurgeries(); // Run monthly scheduler
 
                 Console.WriteLine($"Surgery scheduling attempted.");
-                Console.WriteLine($"  Successfully scheduled: {surgeryPatients.Count(p => p.ScheduledSurgeryDate.HasValue)}"); // Count successful ones from the original list
+                Console.WriteLine($"  Successfully scheduled: {surgeryPatients.Count(p => p.ScheduledSurgeryDate.HasValue)}");
                 Console.WriteLine($"  Could not schedule: {unscheduledSurgeryPatients.Count}");
                 Console.WriteLine($"Surgery scheduling completed in {stopwatch.ElapsedMilliseconds / 1000.0:F1} seconds");
             }
             else
             {
-                Console.WriteLine("\nSkipping surgery scheduling (no patients needing surgery/procedure ID, ORs, procedures, or surgeons available).");
-                unscheduledSurgeryPatients.AddRange(surgeryPatients); // All are unscheduled if skipped
+                Console.WriteLine("\nSkipping surgery scheduling (missing required data/resources).");
+                unscheduledSurgeryPatients.AddRange(surgeryPatients);
             }
 
             // --- Step 3: Assign Regular Patients (Genetic Algorithm) ---
@@ -171,7 +199,7 @@ namespace MedScheduler // Or your appropriate namespace
                 this.gaGenerationsRun = geneticScheduler.currentGeneration; // Store actual generations
                 this.gaFinalBestFitness = geneticScheduler.bestFitness; // Store actual fitness
                 // Update the main patient list with doctor assignments from the final schedule
-                UpdatePatientsWithDoctorAssignments(finalDoctorSchedule);
+                await UpdateSingeletonData(finalDoctorSchedule);
 
                 Console.WriteLine($"Doctor assignment completed in {stopwatch.ElapsedMilliseconds / 1000.0:F1} seconds");
             }

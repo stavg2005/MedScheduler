@@ -55,7 +55,7 @@ namespace Models// Or your appropriate namespace
         private readonly double hierarchyWeight = 2.5; // Bonus for matching experience exactly
         private readonly double experienceLevelWeight = 3.0; // Bonus for meeting minimum experience
         private readonly double preferenceMatchWeight = 4.0; // NEW: Weight for doctor preference matching
-
+        internal double unassignedPatientPenaltyMultiplier = 5.0; // Multiplier for urgencyWeight penalty
         // For tracking assignments for continuity of care (simple version)
         // Key: PatientId, Value: Last known DoctorId from input data
         private Dictionary<int, int> previousAssignments = new Dictionary<int, int>();
@@ -186,7 +186,7 @@ namespace Models// Or your appropriate namespace
                     List<Schedule> offspring;
                     if (rnd.NextDouble() < crossoverRate)
                     {
-                        offspring = Crossover(parent1, parent2);
+                        offspring = CrossoverPMX(parent1, parent2);
                     }
                     else
                     {
@@ -224,7 +224,7 @@ namespace Models// Or your appropriate namespace
 
             // Optional: Update persistent previous assignments if needed for future runs
             // UpdatePreviousAssignments(finalSchedule);
-
+           
             return finalSchedule;
         }
         #endregion
@@ -398,6 +398,213 @@ namespace Models// Or your appropriate namespace
             return new List<Schedule> { offspring1, offspring2 };
         }
 
+        #region Crossover Implementation - PMX Adaptation
+
+        /// <summary>
+        /// Performs Partially Mapped Crossover (PMX), adapted for the doctor-patient assignment problem.
+        /// Focuses on swapping segments and resolving conflicts based on feasibility (workload, suitability).
+        /// </summary>
+        /// <param name="parent1">The first parent schedule.</param>
+        /// <param name="parent2">The second parent schedule.</param>
+        /// <returns>A list containing two new offspring schedules.</returns>
+        private List<Schedule> CrossoverPMX(Schedule parent1, Schedule parent2)
+        {
+            // --- Step 1: Initialize Offspring and Workload Tracking ---
+            var offspring1 = new Schedule();
+            var offspring2 = new Schedule();
+
+            // Track workloads dynamically for each offspring as it's built
+            // Initialize with all doctors having 0 workload for this new schedule
+            var offspring1Workloads = DoctorsById.Keys.ToDictionary(id => id, id => 0);
+            var offspring2Workloads = DoctorsById.Keys.ToDictionary(id => id, id => 0);
+
+            // --- Step 2: Prepare Patient Sequence ---
+            // Get a consistent order of patients to treat as the "chromosome"
+            // Filter out patients needing surgery as they are handled separately
+            var patientSequence = PatientsById.Values
+                                             .Where(p => !p.NeedsSurgery)
+                                             .Select(p => p.Id) // Work with IDs
+                                             .ToList();
+            int n = patientSequence.Count;
+
+            // If there are no patients to schedule, return empty schedules
+            if (n == 0)
+            {
+                Console.WriteLine("Warning: CrossoverPMX called with no patients to schedule.");
+                return new List<Schedule> { offspring1, offspring2 };
+            }
+
+            // --- Step 3: Select Crossover Points ---
+            int point1 = rnd.Next(n);
+            int point2 = rnd.Next(n);
+            // Ensure points are distinct if possible (only matters if n > 1)
+            if (n > 1 && point1 == point2)
+            {
+                point2 = (point1 + 1) % n;
+            }
+            int start = Math.Min(point1, point2);
+            int end = Math.Max(point1, point2); // Segment includes indices [start, end)
+
+            // --- Step 4: Copy Segment & Build Initial Mapping (Optional) ---
+            // This dictionary maps DocInP1 -> DocInP2 for the segment, useful for conflict resolution
+            var mappingP1toP2 = new Dictionary<int, int>();
+            // You might also need the reverse mapping
+            var mappingP2toP1 = new Dictionary<int, int>();
+
+            // Process patients WITHIN the segment
+            for (int i = start; i < end; i++)
+            {
+                int patientId = patientSequence[i];
+                if (!PatientsById.TryGetValue(patientId, out Patient patient)) continue; // Safety check
+
+                int? assignedDoc1 = null; // Doctor assigned in offspring1 for this patient
+                int? assignedDoc2 = null; // Doctor assigned in offspring2 for this patient
+
+                // Try assigning P2's assignment to Offspring 1
+                if (parent2.PatientToDoctor.TryGetValue(patientId, out int docIdP2) &&
+                    DoctorsById.TryGetValue(docIdP2, out Doctor docP2) &&
+                    offspring1Workloads[docIdP2] < docP2.MaxWorkload && // Check capacity in OFFSPRING 1
+                    docP2.IsSuitableFor(patient))
+                {
+                    AssignPatientToDoctor(offspring1, patientId, docIdP2);
+                    offspring1Workloads[docIdP2]++;
+                    assignedDoc1 = docIdP2; // Record the doctor assigned in offspring 1
+                }
+
+                // Try assigning P1's assignment to Offspring 2
+                if (parent1.PatientToDoctor.TryGetValue(patientId, out int docIdP1) &&
+                    DoctorsById.TryGetValue(docIdP1, out Doctor docP1) &&
+                    offspring2Workloads[docIdP1] < docP1.MaxWorkload && // Check capacity in OFFSPRING 2
+                    docP1.IsSuitableFor(patient))
+                {
+                    AssignPatientToDoctor(offspring2, patientId, docIdP1);
+                    offspring2Workloads[docIdP1]++;
+                    assignedDoc2 = docIdP1; // Record the doctor assigned in offspring 2
+                }
+
+                // If both assignments were successful, create the mapping for this position
+                if (assignedDoc1.HasValue && assignedDoc2.HasValue)
+                {
+                    int docInO1 = assignedDoc1.Value; // Doctor assigned in offspring 1 (from P2)
+                    int docInO2 = assignedDoc2.Value; // Doctor assigned in offspring 2 (from P1)
+
+                    // Use ContainsKey check before Add for older framework compatibility
+                    if (!mappingP1toP2.ContainsKey(docInO2)) // Map: DocInO2 (from P1) -> DocInO1 (from P2)
+                    {
+                        mappingP1toP2.Add(docInO2, docInO1);
+                    }
+                    if (!mappingP2toP1.ContainsKey(docInO1)) // Map: DocInO1 (from P2) -> DocInO2 (from P1)
+                    {
+                        mappingP2toP1.Add(docInO1, docInO2);
+                    }
+                }
+            }
+
+            // --- Step 5: Fill Outside Segment (Legalization) ---
+            for (int i = 0; i < n; i++)
+            {
+                // Skip patients already processed within the segment
+                if (i >= start && i < end) continue;
+
+                int currentPatientId = patientSequence[i];
+                if (!PatientsById.TryGetValue(currentPatientId, out Patient currentPatient)) continue; // Safety
+
+                // --- Process for Offspring 1 (uses Parent 1 mainly) ---
+                if (!offspring1.PatientToDoctor.ContainsKey(currentPatientId)) // If not assigned during segment copy
+                {
+                    // Pass the P1->P2 mapping relevant for Offspring 1
+                    TryAssignPatientOutsideSegment(parent1, offspring1, offspring1Workloads, currentPatientId, currentPatient, mappingP1toP2);
+                }
+
+                // --- Process for Offspring 2 (uses Parent 2 mainly) ---
+                if (!offspring2.PatientToDoctor.ContainsKey(currentPatientId)) // If not assigned during segment copy
+                {
+                    // Pass the P2->P1 mapping relevant for Offspring 2
+                    TryAssignPatientOutsideSegment(parent2, offspring2, offspring2Workloads, currentPatientId, currentPatient, mappingP2toP1);
+                }
+            }
+
+            // --- Step 6: Handle Remaining Unassigned (Optional but Recommended) ---
+            // Use RecalculateWorkloads to ensure accurate counts before this final pass
+            AssignRemainingPatients(offspring1, RecalculateWorkloads(offspring1));
+            AssignRemainingPatients(offspring2, RecalculateWorkloads(offspring2));
+
+            // --- Step 7: Return Offspring ---
+            return new List<Schedule> { offspring1, offspring2 };
+        }
+
+        /// <summary>
+        /// Helper method for PMX Crossover Step 5 (Legalization).
+        /// Tries to assign a patient outside the initial segment, prioritizing direct parent assignment,
+        /// then mapped assignment (if available and feasible), then a fallback search.
+        /// </summary>
+        /// <param name="sourceParent">The parent providing the primary gene for this position.</param>
+        /// <param name="targetOffspring">The offspring schedule being built.</param>
+        /// <param name="offspringWorkloads">The current workload tracking for the target offspring.</param>
+        /// <param name="patientId">The ID of the patient to assign.</param>
+        /// <param name="patient">The Patient object.</param>
+        /// <param name="segmentMapping">Mapping dictionary (SourceParentDoc -> OtherParentDoc) derived from the segment swap.</param>
+        private void TryAssignPatientOutsideSegment(
+            Schedule sourceParent,
+            Schedule targetOffspring,
+            Dictionary<int, int> offspringWorkloads,
+            int patientId,
+            Patient patient,
+            Dictionary<int, int> segmentMapping)
+        {
+            bool assigned = false;
+
+            // Attempt 1: Direct assignment from source parent
+            if (sourceParent.PatientToDoctor.TryGetValue(patientId, out int sourceDoctorId) &&
+                DoctorsById.TryGetValue(sourceDoctorId, out Doctor sourceDoctor) &&
+                offspringWorkloads[sourceDoctorId] < sourceDoctor.MaxWorkload && // Check capacity in OFFSPRING
+                sourceDoctor.IsSuitableFor(patient))                               // Check suitability
+            {
+                AssignPatientToDoctor(targetOffspring, patientId, sourceDoctorId);
+                offspringWorkloads[sourceDoctorId]++;
+                assigned = true;
+                // Console.WriteLine($"PMX Assign [{patientId}]: Direct from Parent {sourceDoctorId}"); // Debug
+            }
+
+            // Attempt 2: Try mapped doctor if direct assignment failed or wasn't possible, and mapping exists
+            if (!assigned && sourceParent.PatientToDoctor.TryGetValue(patientId, out sourceDoctorId) /* only try if source had *some* assignment */)
+            {
+                if (segmentMapping.TryGetValue(sourceDoctorId, out int mappedDoctorId) &&
+                    DoctorsById.TryGetValue(mappedDoctorId, out Doctor mappedDoctor) &&
+                    offspringWorkloads[mappedDoctorId] < mappedDoctor.MaxWorkload && // Check capacity of MAPPED doctor
+                    mappedDoctor.IsSuitableFor(patient))                             // Check suitability of MAPPED doctor
+                {
+                    AssignPatientToDoctor(targetOffspring, patientId, mappedDoctorId);
+                    offspringWorkloads[mappedDoctorId]++;
+                    assigned = true;
+                    // Console.WriteLine($"PMX Assign [{patientId}]: Mapped from {sourceDoctorId} -> {mappedDoctorId}"); // Debug
+                }
+            }
+
+            //Attempt 3: Fallback if still not assigned (Optional, could rely on AssignRemainingPatients later)
+            // You might choose *not* to include this fallback directly within crossover
+            // to keep the operator simpler and rely on the final pass or mutation.
+            
+            if (!assigned)
+            {
+                // Find *any* suitable doctor with capacity using the current offspring workloads
+                Doctor fallbackDoctor = FindBestInitialDoctorForPatient(patient, offspringWorkloads); // Re-use existing logic
+                if (fallbackDoctor != null)
+                {
+                    AssignPatientToDoctor(targetOffspring, patientId, fallbackDoctor.Id);
+                    offspringWorkloads[fallbackDoctor.Id]++;
+                    assigned = true;
+                      Console.WriteLine($"PMX Assign [{patientId}]: Fallback {fallbackDoctor.Id}"); // Debug
+                }
+            }
+            
+
+            // If not assigned after all attempts, the patient remains unassigned in this offspring for now.
+            // The optional Step 6 (AssignRemainingPatients) might assign them later.
+        }
+
+        #endregion // Crossover Implementation - PMX Adaptation
+
         /// <summary>
         /// Helper for crossover: Tries to assign a patient to an offspring from a source parent.
         /// Updates the temporary workload dictionary for the offspring.
@@ -425,19 +632,22 @@ namespace Models// Or your appropriate namespace
         /// </summary>
         private void Mutate(Schedule schedule)
         {
-            // Recalculate current workloads for this specific schedule before mutating
             var currentWorkloads = RecalculateWorkloads(schedule);
+            // Increase chances of mutations aimed at fixing assignments
+            int mutationType = rnd.Next(100); // Use 0-99 range
 
-            int mutationType = rnd.Next(5); // Added new types
+            if (mutationType < 25) // 25% chance: Add Unassigned (Increased chance)
+                MutateAddUnassignedPatients(schedule, currentWorkloads);
+            else if (mutationType < 45) // 20% chance: Optimize Preferences
+                MutateOptimizePreferences(schedule, currentWorkloads);
+            else if (mutationType < 65) // 20% chance: Improve Continuity
+                MutateForContinuity(schedule, currentWorkloads);
+            else if (mutationType < 85) // 20% chance: Balance Workload
+                MutateForWorkloadBalance(schedule, currentWorkloads);
+            else // 15% chance: Simple Reassign
+                MutateReassignPatient(schedule, currentWorkloads);
 
-            switch (mutationType)
-            {
-                case 0: MutateReassignPatient(schedule, currentWorkloads); break; // Simple reassign
-                case 1: MutateForWorkloadBalance(schedule, currentWorkloads); break;
-                case 2: MutateForContinuity(schedule, currentWorkloads); break; // Corrected version below
-                case 3: MutateAddUnassignedPatients(schedule, currentWorkloads); break;
-                case 4: MutateOptimizePreferences(schedule, currentWorkloads); break;
-            }
+            // Could add swap mutation here as well
         }
 
         // --- Other Mutation Methods (MutateReassignPatient, MutateForWorkloadBalance, etc. - keep as before) ---
@@ -564,25 +774,35 @@ namespace Models// Or your appropriate namespace
         /// <summary>
         /// Mutation: Tries to assign currently unassigned patients.
         /// </summary>
+       
+
         private void MutateAddUnassignedPatients(Schedule schedule, Dictionary<int, int> currentWorkloads)
         {
             var assignedPatientIds = new HashSet<int>(schedule.PatientToDoctor.Keys);
             var unassigned = PatientsById.Values
-                .Where(p => !p.NeedsSurgery && !assignedPatientIds.Contains(p.Id))
-                .OrderByDescending(p => (int)p.Urgency) // Prioritize higher urgency
+                .Where(p => !assignedPatientIds.Contains(p.Id)) // Already filtered for non-surgery
+                .OrderByDescending(p => (int)p.Urgency)
                 .ThenBy(_ => rnd.Next())
-                .Take(2) // Try to add a couple
+                .Take(5) // *** INCREASED: Try to assign more unassigned patients ***
                 .ToList();
 
+            int assignedCount = 0;
             foreach (var patient in unassigned)
             {
-                var suitableDoctor = FindBestInitialDoctorForPatient(patient, currentWorkloads); // Reuse initial assignment logic
+                var suitableDoctor = FindBestInitialDoctorForPatient(patient, currentWorkloads);
                 if (suitableDoctor != null)
                 {
-                    AssignPatientToDoctor(schedule, patient.Id, suitableDoctor.Id);
-                    currentWorkloads[suitableDoctor.Id]++; // Update local workload count
+                    // Ensure workload dict reflects reality before checking capacity again
+                    int currentLoad = currentWorkloads.ContainsKey(suitableDoctor.Id) ? currentWorkloads[suitableDoctor.Id] : 0;
+                    if (currentLoad < suitableDoctor.MaxWorkload)
+                    {
+                        AssignPatientToDoctor(schedule, patient.Id, suitableDoctor.Id);
+                        currentWorkloads[suitableDoctor.Id]++; // Update local workload count
+                        assignedCount++;
+                    }
                 }
             }
+            if (assignedCount > 0) Console.WriteLine($"MutateAddUnassigned: Added {assignedCount} patients.");
         }
 
         /// <summary>
@@ -741,111 +961,46 @@ namespace Models// Or your appropriate namespace
         /// </summary>
         private double ScoreSchedule(Schedule schedule)
         {
-            // Use cached score if available and valid (e.g., > -1)
-            if (schedule.FitnessScore >= 0)
-            {
-                return schedule.FitnessScore;
-            }
+            if (schedule.FitnessScore >= 0) return schedule.FitnessScore; // Use cache
 
             double score = 0;
-            var currentWorkloads = RecalculateWorkloads(schedule); // Get accurate workloads for this schedule
+            var currentWorkloads = RecalculateWorkloads(schedule);
 
-            // --- Score each assignment ---
+            // Score assignments
             foreach (var assignment in schedule.PatientToDoctor)
-            {
-                int patientId = assignment.Key;
-                int doctorId = assignment.Value;
-
-                if (!PatientsById.TryGetValue(patientId, out Patient patient) ||
-                    !DoctorsById.TryGetValue(doctorId, out Doctor doctor))
-                {
-                    continue; // Skip if data is missing
-                }
-
-                // 1. Base score for assignment
+            { /* ... existing scoring logic ... */
+                int patientId = assignment.Key; int doctorId = assignment.Value;
+                if (!PatientsById.TryGetValue(patientId, out Patient patient) || !DoctorsById.TryGetValue(doctorId, out Doctor doctor)) continue;
                 score += patientAssignmentWeight;
-
-                // 2. Specialization Match Bonus
-                if (doctor.Specialization == patient.RequiredSpecialization)
-                {
-                    score += specializationMatchWeight;
-                }
-                else
-                {
-                    score -= specializationMatchWeight; // Penalty for mismatch
-                }
-
-                // 3. Urgency Bonus (Higher urgency contributes more)
+                if (doctor.Specialization == patient.RequiredSpecialization) score += specializationMatchWeight; else score -= specializationMatchWeight; // Penalty added
                 score += (int)patient.Urgency * urgencyWeight;
-
-                // 4. Experience Level Bonus/Penalty
                 ExperienceLevel requiredLevel = GetRequiredExperienceLevel(patient.Urgency);
-                if (doctor.ExperienceLevel >= requiredLevel)
-                {
-                    score += experienceLevelWeight; // Meets minimum requirement
-
-                    // 4a. Hierarchy Bonus (Bonus if experience level is an exact match)
-                    if (doctor.ExperienceLevel == requiredLevel)
-                    {
-                        score += hierarchyWeight;
-                    }
-                    // Optional: Slight penalty if significantly overqualified?
-                    // else if (doctor.ExperienceLevel > requiredLevel + 1) { score -= hierarchyWeight * 0.5; }
-                }
-                else
-                {
-                    score -= experienceLevelWeight * 2; // Significant penalty if under-qualified
-                }
-
-
-                // 5. Continuity of Care Bonus
-                if (previousAssignments.TryGetValue(patientId, out int prevDoctorId) && prevDoctorId == doctorId)
-                {
-                    score += continuityOfCareWeight;
-                }
-
-                // 6. Preference Score Bonus
+                if (doctor.ExperienceLevel >= requiredLevel) { score += experienceLevelWeight; if (doctor.ExperienceLevel == requiredLevel) score += hierarchyWeight; } else { score -= experienceLevelWeight * 2; } // Penalty added
+                if (previousAssignments.TryGetValue(patientId, out int prevDoctorId) && prevDoctorId == doctorId) score += continuityOfCareWeight;
                 score += CalculatePreferenceScoreForPair(doctor, patient) * preferenceMatchWeight;
-
-            } // End loop through assignments
-
-            // --- Score overall workload balance ---
-            double totalWorkloadFactorSquaredSum = 0;
-            int doctorsConsideredForWorkload = 0;
-            foreach (var docId in DoctorsById.Keys) // Consider ALL doctors for balance
-            {
-                if (DoctorsById.TryGetValue(docId, out Doctor doctor) && doctor.MaxWorkload > 0)
-                {
-                    doctorsConsideredForWorkload++;
-                    // Use workload from current schedule, default to 0 if doctor has no assignments
-                    int load = currentWorkloads.TryGetValue(docId, out int currentLoad) ? currentLoad : 0;
-                    double workloadFactor = (double)load / doctor.MaxWorkload;
-                    totalWorkloadFactorSquaredSum += Math.Pow(workloadFactor, 2); // Penalize high loads more
-                }
             }
-            // Calculate variance or use average squared factor
+
+            // Score workload balance
+            double totalWorkloadFactorSquaredSum = 0; int doctorsConsideredForWorkload = 0;
+            foreach (var docId in DoctorsById.Keys) { if (DoctorsById.TryGetValue(docId, out Doctor doctor) && doctor.MaxWorkload > 0) { doctorsConsideredForWorkload++; int load = currentWorkloads.TryGetValue(docId, out int currentLoad) ? currentLoad : 0; double workloadFactor = (double)load / doctor.MaxWorkload; totalWorkloadFactorSquaredSum += Math.Pow(workloadFactor, 2); } }
             double avgWorkloadFactorSquared = doctorsConsideredForWorkload > 0 ? totalWorkloadFactorSquaredSum / doctorsConsideredForWorkload : 0;
-            // Score is higher when the average squared factor is lower (closer to 0, meaning balanced low load)
-            // Scale by number of doctors to make it somewhat independent of team size
             score += (1.0 - avgWorkloadFactorSquared) * workloadBalanceWeight * doctorsConsideredForWorkload;
 
-
-            // --- Penalty for unassigned patients ---
-            int unassignedCount = PatientsById.Count(p => !p.Value.NeedsSurgery) - schedule.PatientToDoctor.Count;
-            // Apply a penalty based on urgency of unassigned patients
+            // *** INCREASED PENALTY for unassigned patients ***
             double unassignedPenalty = 0;
             var assignedIds = new HashSet<int>(schedule.PatientToDoctor.Keys);
-            foreach (var patient in PatientsById.Values)
+            foreach (var patient in PatientsById.Values) // Already filtered for non-surgery
             {
-                if (!patient.NeedsSurgery && !assignedIds.Contains(patient.Id))
+                if (!assignedIds.Contains(patient.Id))
                 {
-                    unassignedPenalty += (int)patient.Urgency * urgencyWeight * 1.5; // Heavier penalty for unassigned urgent
+                    // Base penalty + urgency scaling + higher multiplier
+                    unassignedPenalty += ((int)patient.Urgency * urgencyWeight * unassignedPatientPenaltyMultiplier);
+                    // Optionally add a large fixed penalty per unassigned patient too
+                    // unassignedPenalty += 50; // Example fixed penalty
                 }
             }
-            score -= unassignedPenalty;
+            score -= unassignedPenalty; // Subtract the total penalty
 
-
-            // Cache the calculated score
             schedule.FitnessScore = score;
             return score;
         }

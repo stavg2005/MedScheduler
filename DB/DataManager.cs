@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.Linq;
 using ClassLibrary1;
+using DB;
+
 
 // Assuming all models (Doctor, Patient, etc.) and Enums are in the Models namespace
 using Models;
@@ -39,7 +41,7 @@ namespace MedScheduler // Or your appropriate namespace
             Console.WriteLine("Initializing data with Enhanced DataGenerator...");
 
             // 1. Generate Medical Procedures FIRST (as others depend on it)
-            procedures = generator.GenerateProcedures(30); // Generate 30 procedures
+            procedures = generator.GenerateProcedures(50); // Generate 30 procedures
             Console.WriteLine($"Generated {procedures.Count} medical procedures");
             if (procedures == null || !procedures.Any())
             {
@@ -58,7 +60,7 @@ namespace MedScheduler // Or your appropriate namespace
             }
 
             // 3. Generate Operating Rooms - Requires Procedures (for surgical specs)
-            operatingRooms = generator.GenerateOperatingRooms(10, procedures); // Generate 10 ORs
+            operatingRooms = generator.GenerateOperatingRooms(30); // Generate 10 ORs
             Console.WriteLine($"Generated {operatingRooms.Count} operating rooms");
             if (operatingRooms == null) operatingRooms = new List<OperatingRoom>(); // Ensure list exists
 
@@ -73,6 +75,9 @@ namespace MedScheduler // Or your appropriate namespace
             currentDoctorSchedule = null;
 
             Console.WriteLine("Data generation complete.");
+            SqlScriptGenerator scriptGenerator = new SqlScriptGenerator();
+            string scriptFilePath = "C:\\Users\\Stav\\Documents\\sqlScripts\\medscheduler_data.sql"; // Choose path
+            scriptGenerator.GenerateFullScript(scriptFilePath, doctors, patients, procedures, operatingRooms);
         }
 
         // --- Methods to Access Data ---

@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Linq;
+using System.Text;
 using System.Windows.Forms;
+using ClassLibrary1;
 using DB; // Assuming this contains DataManager and DataSingelton
 using Models; // Assuming this contains your Doctor, Patient, Schedule classes
 
@@ -12,32 +14,31 @@ namespace MedScheduler.forms
     public partial class DoctorsForm : UserControl
     {
         // Data Access
-        // Assuming DataManager is in DB namespace
-
-        // Related Forms/Data (Assumed from original)
-        private SchedulesForm schedulesForm;
-        public static SchedulerOrchestrator s;
-        public static Schedule main = new Schedule();
-
-        // --- Pagination Fields ---
-        private List<Doctor> allDoctors = new List<Doctor>(); // Store all doctors here
+        private List<Doctor> allDoctors = new List<Doctor>();
+        private List<Patient> allPatients = new List<Patient>();
+        // Pagination Fields
         private int currentPage = 1;
-        private int doctorsPerPage = 10; // How many doctors to show per page
+        private int doctorsPerPage = 10;
         private int totalPages = 1;
 
-        // --- UI Element Fields (Class Level) ---
-        private Panel tablePanel;      // Panel holding the doctor rows (will be Dock.Fill)
-        private Panel paginationPanel; // Panel holding the pagination buttons (will be Dock.Bottom)
-        private Panel searchPanel;     // Panel for search/actions (will be Dock.Top)
-        private Panel contentPanel;    // Main container panel (Dock.Fill within UserControl)
-
+        // UI Element Fields
+        private Panel tablePanel;      // Panel holding the doctor rows
+        private Panel paginationPanel; // Panel holding the pagination buttons
+        private Panel searchPanel;     // Panel for search/actions
+        private Panel contentPanel;    // Main container panel
+        private Panel tableHeaderPanel;// Header for the table
+        private Panel doctorDetailPanel; // Panel to show doctor details (initially null)
+        private Panel patientDetailPanel;
         // --- Constructor ---
         public DoctorsForm()
         {
+            // It's good practice to check if running in Design Mode
+            if (DesignMode) return;
+
             InitializeComponentDoctors(); // Create UI elements using Docking
-            this.Size = new Size(1000, 700); // Set desired initial size
-            this.Dock = DockStyle.Fill;      // Make UserControl fill its container
-            LoadDoctorsData();              // Load initial data AFTER UI is built
+            this.Size = new Size(1000, 700);
+            this.Dock = DockStyle.Fill;
+            LoadDoctorsData();
         }
 
         // --- Data Loading & Refreshing ---
@@ -46,29 +47,22 @@ namespace MedScheduler.forms
         {
             try
             {
-                // Fetch all doctors once - ensure list is never null
-                allDoctors = DataSingelton.Instance.Doctors ?? new List<Doctor>();
-
-                // Calculate total pages based on the loaded data
+                // Fetch all doctors - ensure list is never null
+                // Replace DataSingelton.Instance with your actual data source if different
+                allDoctors = DataSingelton.Instance?.Doctors ?? new List<Doctor>();
+                allPatients = DataSingelton.Instance?.Patients ?? new List<Patient>();
                 totalPages = (!allDoctors.Any()) ? 1 : (int)Math.Ceiling((double)allDoctors.Count / doctorsPerPage);
+                currentPage = 1;
 
-                // Ensure current page is valid after load/refresh
-                currentPage = 1; // Always reset to page 1 after full load/refresh
-
-                // Display the first page
                 DisplayPage(currentPage);
-
-                // Update pagination button layout after data load might change totalPages
                 CenterPaginationButtons();
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"Error loading doctor data: {ex.Message}", "Data Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                // Ensure a safe state if loading fails
                 allDoctors = new List<Doctor>();
                 totalPages = 1;
                 currentPage = 1;
-                // Display an empty page if possible
                 if (tablePanel != null && paginationPanel != null)
                 {
                     DisplayPage(currentPage);
@@ -77,11 +71,96 @@ namespace MedScheduler.forms
             }
         }
 
-        // Called by the Refresh button
+
+        /// <summary>
+        /// Shows only the main list view panels.
+        /// </summary>
+        private void ShowListView()
+        {
+            HideDoctorDetailPanel(); // Hide doctor detail if visible
+            HidePatientDetailPanel(); // Hide patient detail if visible
+
+            if (searchPanel != null) searchPanel.Visible = true;
+            if (tableHeaderPanel != null) tableHeaderPanel.Visible = true;
+            if (tablePanel != null) tablePanel.Visible = true;
+            if (paginationPanel != null) paginationPanel.Visible = true;
+
+            DisplayPage(currentPage); // Refresh the current page of the list
+            CenterPaginationButtons();
+        }
+
+        /// <summary>
+        /// Hides the main list view and shows the doctor detail panel.
+        /// </summary>
+        private void ShowDoctorDetailView(int doctorId)
+        {
+            Doctor selectedDoctor = allDoctors.FirstOrDefault(d => d.Id == doctorId);
+            if (selectedDoctor == null) { MessageBox.Show("Could not find doctor details.", "Error"); return; }
+
+            // Hide other views
+            HideListViewPanels();
+            HidePatientDetailPanel();
+
+            // Create and show panel
+            doctorDetailPanel = CreateDoctorDetailPanel(selectedDoctor);
+            doctorDetailPanel.Dock = DockStyle.Fill;
+            contentPanel.Controls.Add(doctorDetailPanel);
+            doctorDetailPanel.BringToFront();
+            doctorDetailPanel.Visible = true;
+        }
+
+        /// <summary>
+        /// Hides the main list view and doctor detail, shows patient detail panel.
+        /// </summary>
+        private void ShowPatientDetailView(int patientId)
+        {
+            Patient selectedPatient = allPatients.FirstOrDefault(p => p.Id == patientId);
+            if (selectedPatient == null) { MessageBox.Show("Could not find patient details.", "Error"); return; }
+
+            // Hide other views
+            HideListViewPanels();
+            HideDoctorDetailPanel();
+
+            // Create and show panel
+            patientDetailPanel = CreatePatientDetailPanel(selectedPatient);
+            patientDetailPanel.Dock = DockStyle.Fill;
+            contentPanel.Controls.Add(patientDetailPanel);
+            patientDetailPanel.BringToFront();
+            patientDetailPanel.Visible = true;
+        }
+
+        private void HideListViewPanels()
+        {
+            if (searchPanel != null) searchPanel.Visible = false;
+            if (tableHeaderPanel != null) tableHeaderPanel.Visible = false;
+            if (tablePanel != null) tablePanel.Visible = false;
+            if (paginationPanel != null) paginationPanel.Visible = false;
+        }
+
+        private void HideDoctorDetailPanel()
+        {
+            if (doctorDetailPanel != null)
+            {
+                doctorDetailPanel.Visible = false; // Hide instead of removing immediately if needed
+                contentPanel.Controls.Remove(doctorDetailPanel);
+                doctorDetailPanel.Dispose();
+                doctorDetailPanel = null;
+            }
+        }
+        private void HidePatientDetailPanel()
+        {
+            if (patientDetailPanel != null)
+            {
+                patientDetailPanel.Visible = false;
+                contentPanel.Controls.Remove(patientDetailPanel);
+                patientDetailPanel.Dispose();
+                patientDetailPanel = null;
+            }
+        }
         private void RefreshDoctorList()
         {
-            AddLogMessage("Refreshing doctor list..."); // Optional logging
-            LoadDoctorsData(); // Reloading data handles refresh and UI updates
+            AddLogMessage("Refreshing doctor list...");
+            LoadDoctorsData();
             AddLogMessage("Doctor list refreshed.");
         }
 
@@ -89,687 +168,516 @@ namespace MedScheduler.forms
 
         private void DisplayPage(int pageNumber)
         {
-            // Safety checks
-            if (tablePanel == null || paginationPanel == null)
-            {
-                AddLogMessage("Error: UI Panels not initialized in DisplayPage.");
-                return;
-            }
-            if (allDoctors == null)
-            {
-                AddLogMessage("Error: allDoctors list is null in DisplayPage. Recovering.");
-                allDoctors = new List<Doctor>();
-                totalPages = 1;
-                pageNumber = 1;
-            }
+            if (tablePanel == null || paginationPanel == null || tableHeaderPanel == null) return; // Ensure panels exist
+            if (allDoctors == null) allDoctors = new List<Doctor>(); // Ensure list exists
 
-            // Ensure page number is valid
             currentPage = Math.Max(1, Math.Min(pageNumber, totalPages));
 
-            // Suspend layout for bulk changes
-            tablePanel.SuspendLayout();
+            tablePanel.SuspendLayout(); // Suspend layout for performance
 
-            // --- Clear existing doctor rows (but not the header) ---
-            var rowsToRemove = tablePanel.Controls.OfType<Panel>()
-                                       .Where(p => p.Tag?.ToString() == "DoctorRows")
-                                       .ToList();
+            // Clear existing doctor rows (but not the header panel itself)
+            var rowsToRemove = tablePanel.Controls.OfType<Panel>().Where(p => p.Tag?.ToString() == "DoctorRow").ToList();
             foreach (var row in rowsToRemove)
             {
                 tablePanel.Controls.Remove(row);
                 row.Dispose();
             }
 
-            // --- Get doctors for the current page using LINQ ---
-            var PatientToShow = allDoctors
-                                .Skip((currentPage - 1) * doctorsPerPage)
-                                .Take(doctorsPerPage)
-                                .ToList();
+            // Get doctors for the current page
+            var doctorsToShow = allDoctors
+                .Skip((currentPage - 1) * doctorsPerPage)
+                .Take(doctorsPerPage)
+                .ToList();
 
-            // --- Add rows for the current page's doctors ---
-            int yPos = 0; // Start below header
-            foreach (var pt in PatientToShow)
+            // Add rows for the current page's doctors
+            int yPos = 0; // Start rows at the top of tablePanel
+            foreach (var doc in doctorsToShow)
             {
-                string name = pt.Name ?? "N/A";
-                string specilazation = pt.Specialization ?? "N/A";
-                string workload = pt.Workload.ToString() ?? "0";
+                string name = doc.Name ?? "N/A";
+                string specialization = doc.Specialization ?? "N/A";
+                // Use actual workload if available, otherwise calculate from schedule? Defaulting to stored value.
+                string workload = doc.Workload.ToString();
 
-                AddPatientRow(tablePanel, 0, yPos, name, specilazation, workload, pt.Id);
-                // yPos will be managed by the docking/layout of rows if we switch rows to use Dock.Top
-                // For now, we keep manual Y, but relative to header bottom
-                // We find the last added row to calculate next Y
-                Panel lastRow = tablePanel.Controls.OfType<Panel>().LastOrDefault(p => p.Tag?.ToString() == "DoctorRows");
-                yPos = (lastRow?.Bottom ?? yPos); // Start next row below the last one
+                // *** Use the renamed method ***
+                AddDoctorRow(tablePanel, 0, yPos, name, specialization, workload, doc.Id);
+
+                Panel lastRow = tablePanel.Controls.OfType<Panel>().LastOrDefault(p => p.Tag?.ToString() == "DoctorRow");
+                yPos = (lastRow?.Bottom ?? yPos) + 1; // Position next row below the last one with a small gap
             }
 
-            // Resume layout after adding rows
-            tablePanel.ResumeLayout(true);
+            tablePanel.ResumeLayout(true); // Resume layout
 
-
-            // --- Update the appearance of pagination buttons ---
             UpdatePaginationButtons();
+            tablePanel.ScrollControlIntoView(tablePanel.Controls.OfType<Control>().FirstOrDefault()); // Scroll to top
         }
 
-        // Updates the visual state (enabled/disabled, highlight) of pagination buttons
-        private void UpdatePaginationButtons()
-        {
-            if (paginationPanel == null)
-            {
-                AddLogMessage("Error: paginationPanel is null in UpdatePaginationButtons.");
-                return;
-            }
-
-            // Determine which page numbers to show (e.g., max 5 buttons: Prev, 1, 2, 3, Next)
-            // This logic might need adjustment based on desired look & feel for many pages
-            int maxNumericButtons = 5; // Example: Show up to 5 numeric buttons
-            int startPage = Math.Max(1, currentPage - (maxNumericButtons / 2));
-            int endPage = Math.Min(totalPages, startPage + maxNumericButtons - 1);
-            // Adjust startPage if endPage was capped
-            if (endPage - startPage + 1 < maxNumericButtons)
-            {
-                startPage = Math.Max(1, endPage - maxNumericButtons + 1);
-            }
-
-
-            foreach (Control ctrl in paginationPanel.Controls)
-            {
-                if (ctrl is Button pageButton)
-                {
-                    // Reset defaults
-                    pageButton.Enabled = true;
-                    pageButton.Visible = true; // Assume visible unless hidden below
-                    pageButton.ForeColor = ColorTranslator.FromHtml("#7F8C8D");
-                    pageButton.BackColor = Color.White;
-                    pageButton.Font = new Font("Segoe UI", 11); // Reset font
-
-                    bool isNumericButton = int.TryParse(pageButton.Tag?.ToString(), out int pageNumTag); // Use Tag for page number
-                    bool isPrevNextButton = (pageButton.Tag?.ToString() == "Prev" || pageButton.Tag?.ToString() == "Next");
-
-                    if (isPrevNextButton)
-                    {
-                        if (pageButton.Tag.ToString() == "Prev")
-                        {
-                            pageButton.Enabled = currentPage > 1;
-                            pageButton.ForeColor = pageButton.Enabled ? ColorTranslator.FromHtml("#3498DB") : Color.LightGray;
-                        }
-                        else // Next
-                        {
-                            pageButton.Enabled = currentPage < totalPages;
-                            pageButton.ForeColor = pageButton.Enabled ? ColorTranslator.FromHtml("#3498DB") : Color.LightGray;
-                        }
-                    }
-                    else if (isNumericButton)
-                    {
-                        // Logic to show only relevant page numbers
-                        if (pageNumTag >= startPage && pageNumTag <= endPage)
-                        {
-                            pageButton.Text = pageNumTag.ToString(); // Set text correctly
-                            pageButton.Visible = true;
-
-                            // Style the currently selected page number
-                            if (pageNumTag == currentPage)
-                            {
-                                pageButton.ForeColor = Color.White;
-                                pageButton.BackColor = ColorTranslator.FromHtml("#3498DB"); // Active blue
-                                pageButton.Font = new Font("Segoe UI", 11, FontStyle.Bold);
-                            }
-                        }
-                        else
-                        {
-                            // This numeric button is outside the range to display
-                            pageButton.Visible = false;
-                            pageButton.Enabled = false;
-                        }
-                    }
-                    // Handle cases where totalPages is very small
-                    if (totalPages <= 1 && isPrevNextButton)
-                    {
-                        pageButton.Enabled = false;
-                        pageButton.ForeColor = Color.LightGray;
-                    }
-                    if (totalPages < pageNumTag && isNumericButton)
-                    {
-                        pageButton.Visible = false;
-                        pageButton.Enabled = false;
-                    }
-
-
-                }
-            }
-            // Recenter buttons after visibility changes might alter total width
-            CenterPaginationButtons();
-        }
-
-        // Centers the visible pagination buttons within the paginationPanel
-        private void CenterPaginationButtons()
-        {
-            if (paginationPanel == null || !paginationPanel.IsHandleCreated || paginationPanel.ClientSize.Width <= 0)
-            {
-                //AddLogMessage("Warning: Cannot center pagination buttons - panel not ready.");
-                return; // Avoid calculation if panel isn't ready or has no width
-            }
-
-            var visibleButtons = paginationPanel.Controls.OfType<Button>().Where(b => b.Visible).ToList();
-            if (!visibleButtons.Any()) return;
-
-            int buttonWidth = 30; // Assuming fixed width
-            int buttonSpacing = 5;
-            int totalButtonWidth = visibleButtons.Count * buttonWidth + (visibleButtons.Count - 1) * buttonSpacing;
-            int startX = Math.Max(0, (paginationPanel.ClientSize.Width - totalButtonWidth) / 2); // Center horizontally
-            int currentX = startX;
-            int buttonY = (paginationPanel.ClientSize.Height - visibleButtons.First().Height) / 2; // Center vertically
-
-            foreach (var button in visibleButtons)
-            {
-                button.Location = new Point(currentX, buttonY);
-                currentX += button.Width + buttonSpacing;
-            }
-        }
-
-        // Event handler for resizing the pagination panel to recenter buttons
-        private void PaginationPanel_Resize(object sender, EventArgs e)
-        {
-            CenterPaginationButtons();
-        }
-
-
-        // --- Row Creation ---
-
-        // Adds a single doctor row panel to the specified parent panel
-        private void AddPatientRow(Panel parent, int x, int y, string name, string specialty, string patientCount, int doctorId)
+        // --- Row Creation (Renamed and Modified) ---
+        private void AddDoctorRow(Panel parent, int x, int y, string name, string specialty, string workload, int doctorId)
         {
             Panel rowPanel = new Panel
             {
-                // Docking rows might be better, but for now, keep manual Y positioning
                 Location = new Point(x, y),
-                // Use parent's ClientSize for width, considering scrollbars if any
-                Size = new Size(parent.ClientSize.Width - (System.Windows.Forms.SystemInformation.VerticalScrollBarWidth * (parent.VerticalScroll.Visible ? 1 : 0)), 40),
+                Size = new Size(parent.ClientSize.Width - (SystemInformation.VerticalScrollBarWidth * (parent.VerticalScroll.Visible ? 1 : 0)), 40),
                 BackColor = Color.White,
-                Tag = "DoctorRows", // Tag to identify for removal
-                // Anchor Left/Right so it resizes horizontally with parent
+                Tag = "DoctorRow", // Updated Tag
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-                Visible = true
             };
 
-            // Draw bottom border line for the row
-            rowPanel.Paint += (sender, e) => {
-                using (Pen grayPen = new Pen(ColorTranslator.FromHtml("#ECF0F1"), 1)) // Light gray border
-                {
+            rowPanel.Paint += (sender, e) => { /* ... border drawing ... */
+                using (Pen grayPen = new Pen(ColorTranslator.FromHtml("#ECF0F1"), 1))
                     e.Graphics.DrawLine(grayPen, 0, rowPanel.Height - 1, rowPanel.Width, rowPanel.Height - 1);
-                }
             };
 
-            // Define column widths/positions (adjust as needed)
+            // Define column widths/positions (match header)
             int col1_Name_Width = 200;
-            int col2_Spec_X = col1_Name_Width + 20; // Start Specialty label here
+            int col2_Spec_X = col1_Name_Width + 20;
             int col2_Spec_Width = 200;
-            int col3_Pat_X = col2_Spec_X + col2_Spec_Width + 20; // Start Patient label here
-            // Actions buttons positioned from the right
+            int col3_Load_X = col2_Spec_X + col2_Spec_Width + 20;
 
-            int labelY = (rowPanel.Height - 20) / 2; // Approx vertical center
+            int labelY = (rowPanel.Height - 20) / 2;
             int leftPadding = 20;
 
-            // Name Label
-            Label nameLabel = new Label { Text = name, ForeColor = ColorTranslator.FromHtml("#2C3E50"), Font = new Font("Segoe UI", 12), Location = new Point(leftPadding, labelY), AutoSize = true };
+            // Name Label - *** MADE CLICKABLE ***
+            Label nameLabel = new Label
+            {
+                Text = name,
+                ForeColor = ColorTranslator.FromHtml("#3498DB"), // Blue to look like a link
+                Font = new Font("Segoe UI", 12, FontStyle.Underline), // Underline
+                Location = new Point(leftPadding, labelY),
+                AutoSize = true,
+                Cursor = Cursors.Hand, // Indicate clickable
+                Tag = doctorId // Store doctorId for the click event
+            };
+            nameLabel.Click += NameLabel_Click; // Attach click event handler
             rowPanel.Controls.Add(nameLabel);
 
             // Specialty Label
             Label specialtyLabel = new Label { Text = specialty, ForeColor = ColorTranslator.FromHtml("#2C3E50"), Font = new Font("Segoe UI", 12), Location = new Point(col2_Spec_X, labelY), AutoSize = true };
             rowPanel.Controls.Add(specialtyLabel);
 
-            // Patient Count Label
-            Label patientLabel = new Label { Text = patientCount, ForeColor = ColorTranslator.FromHtml("#2C3E50"), Font = new Font("Segoe UI", 12), Location = new Point(col3_Pat_X, labelY), AutoSize = true };
-            rowPanel.Controls.Add(patientLabel);
+            // Workload Label (previously patientCount)
+            Label workloadLabel = new Label { Text = workload, ForeColor = ColorTranslator.FromHtml("#2C3E50"), Font = new Font("Segoe UI", 12), Location = new Point(col3_Load_X, labelY), AutoSize = true };
+            rowPanel.Controls.Add(workloadLabel);
 
-            // --- Action Buttons (Edit & Delete) ---
-            int actionButtonY = (rowPanel.Height - 28) / 2; // Center button vertically
+            // Action Buttons
+            int actionButtonY = (rowPanel.Height - 28) / 2;
             int spacing = 5;
-            int marginRight = 20; // Margin from the right edge
-
-            Button deleteButton = CreateActionButton("D", "#E74C3C", 0, actionButtonY); // Red
-            Button editButton = CreateActionButton("E", "#3498DB", 0, actionButtonY);   // Blue
-
-            // Assign Doctor ID to buttons' Tag
+            int marginRight = 20;
+            Button deleteButton = CreateActionButton("D", "#E74C3C", 0, actionButtonY);
+            Button editButton = CreateActionButton("E", "#3498DB", 0, actionButtonY);
             editButton.Tag = doctorId;
             deleteButton.Tag = doctorId;
-
-            // Add click handlers
             editButton.Click += EditButton_Click;
             deleteButton.Click += DeleteButton_Click;
-
-            // Position from right edge - Anchor them right
             deleteButton.Location = new Point(rowPanel.ClientSize.Width - deleteButton.Width - marginRight, actionButtonY);
             editButton.Location = new Point(deleteButton.Left - editButton.Width - spacing, actionButtonY);
             deleteButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             editButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-
-
             rowPanel.Controls.Add(editButton);
             rowPanel.Controls.Add(deleteButton);
 
-            // Add the completed row to the table panel
             parent.Controls.Add(rowPanel);
-
-
         }
 
+        // --- Navigation and Detail View ---
 
-        // Helper method to create styled action buttons
-        private Button CreateActionButton(string text, string htmlColor, int x, int y)
+        /// <summary>
+        /// Handles clicks on the doctor's name label.
+        /// </summary>
+        private void NameLabel_Click(object sender, EventArgs e)
         {
-            Button button = new Button
+            if (sender is Label clickedLabel && clickedLabel.Tag is int doctorId)
             {
-                Text = text,
-                Location = new Point(x, y),
-                Size = new Size(28, 28), // Small square button
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                ForeColor = ColorTranslator.FromHtml(htmlColor),
-                BackColor = ControlPaint.LightLight(ColorTranslator.FromHtml(htmlColor)), // Use a very light version for background
-                Cursor = Cursors.Hand,
-                TextAlign = ContentAlignment.MiddleCenter,
-                Padding = new Padding(0) // Remove default padding
+                ShowDoctorDetailPanel(doctorId);
+            }
+        }
+
+        /// <summary>
+        /// Finds the doctor and displays their details in a new panel.
+        /// </summary>
+        private void ShowDoctorDetailPanel(int doctorId)
+        {
+            Doctor selectedDoctor = allDoctors.FirstOrDefault(d => d.Id == doctorId);
+            if (selectedDoctor == null)
+            {
+                MessageBox.Show("Could not find doctor details.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            // Hide the main list view panels
+            searchPanel.Visible = false;
+            tableHeaderPanel.Visible = false;
+            tablePanel.Visible = false;
+            paginationPanel.Visible = false;
+
+            // Create and show the detail panel
+            doctorDetailPanel = CreateDoctorDetailPanel(selectedDoctor);
+            doctorDetailPanel.Dock = DockStyle.Fill; // Make it fill the content area
+            contentPanel.Controls.Add(doctorDetailPanel);
+            doctorDetailPanel.BringToFront(); // Ensure it's visible
+        }
+
+        /// <summary>
+        /// Hides the detail panel and shows the main list view again.
+        /// </summary>
+
+
+        /// <summary>
+        /// Creates the panel to display detailed doctor information.
+        /// </summary>
+        private Panel CreateDoctorDetailPanel(Doctor doctor)
+        {
+            Panel detailPanel = new Panel { Name = "DoctorDetailView", BackColor = Color.White, Padding = new Padding(20), AutoScroll = true, BorderStyle = BorderStyle.FixedSingle };
+            int currentY = 10; int labelX = 20; int spacing = 28;
+            Font labelFont = new Font("Segoe UI", 11F); Font valueFont = new Font("Segoe UI", 11F);
+            Color valueColor = ColorTranslator.FromHtml("#2C3E50");
+
+            // Back Button
+            Button backButton = new Button { Text = "⬅ Back to List", Font = new Font("Segoe UI", 10F, FontStyle.Bold), Location = new Point(labelX, currentY), Size = new Size(120, 30), FlatStyle = FlatStyle.Flat, BackColor = ColorTranslator.FromHtml("#95A5A6"), ForeColor = Color.White, Cursor = Cursors.Hand };
+            backButton.FlatAppearance.BorderSize = 0;
+            backButton.Click += (s, e) => ShowListView(); // Go back to list
+            detailPanel.Controls.Add(backButton); currentY += 50;
+
+            // Doctor Info
+            AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "ID:", doctor.Id.ToString());
+            AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "Name:", doctor.Name);
+            // ... (Add other doctor fields: Specialization, Experience, Workload, Max Workload) ...
+            AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "Specialization:", doctor.Specialization);
+            AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "Experience:", doctor.ExperienceLevel.ToString());
+            AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "Current Workload:", doctor.Workload.ToString());
+            AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "Max Workload:", doctor.MaxWorkload.ToString());
+
+
+            // Preferences TextBox
+            AddDetailTextBox(detailPanel, ref currentY, spacing, labelX, labelFont, "Preferences:", doctor.Preferences?.Any() == true ? FormatPreferences(doctor.Preferences) : "No preferences defined.");
+
+            // Surgeon Details
+            if (doctor is Surgeon surgeon)
+            {
+                AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "Is Surgeon:", "Yes");
+                AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "Available for Surgery:", surgeon.IsAvailableForSurgery ? "Yes" : "No");
+                AddDetailTextBox(detailPanel, ref currentY, spacing, labelX, labelFont, "Availability Slots:", surgeon.Availability?.Any() == true ? FormatAvailability(surgeon.Availability) : "No availability slots defined.", 100); // Larger textbox
+            }
+            else { AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "Is Surgeon:", "No"); }
+
+            // --- Assigned Patients Section ---
+            Label assignedLabel = new Label { Text = "Assigned Patients (Current Schedule):", Location = new Point(labelX, currentY), Font = labelFont, AutoSize = true };
+            detailPanel.Controls.Add(assignedLabel);
+            currentY += spacing;
+
+            // Container for patient labels
+            FlowLayoutPanel patientsPanel = new FlowLayoutPanel
+            {
+                Location = new Point(labelX + 5, currentY),
+                Size = new Size(detailPanel.ClientSize.Width - labelX * 2 - 15, 120), // Give it some height
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = ColorTranslator.FromHtml("#F8F9FA"),
+                AutoScroll = true,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
-            button.FlatAppearance.BorderSize = 0; // No border outline
-            return button;
+            detailPanel.Controls.Add(patientsPanel);
+
+            // Get assigned patient IDs from the schedule
+            List<int> assignedPatientIds =doctor.patientsIDS;
+            if (doctor.patientsIDS!=null)
+            {
+
+                foreach (int patientId in assignedPatientIds)
+                {
+                    Patient assignedPatient = allPatients.FirstOrDefault(p => p.Id == patientId);
+                    if (assignedPatient != null)
+                    {
+                        Label patientLabel = new Label
+                        {
+                            Text = $"- {assignedPatient.Name} (ID: {assignedPatient.Id})",
+                            Font = new Font("Segoe UI", 10F, FontStyle.Underline),
+                            ForeColor = ColorTranslator.FromHtml("#3498DB"), // Blue link color
+                            Cursor = Cursors.Hand,
+                            Tag = patientId, // Store patient ID
+                            AutoSize = true, // Let label size itself
+                            Margin = new Padding(3) // Add some margin
+                        };
+                        patientLabel.Click += PatientNameLabel_Click; // Add click handler
+                        patientsPanel.Controls.Add(patientLabel);
+                    }
+                }
+                
+                
+            }
+            else { patientsPanel.Controls.Add(new Label { Text = "None assigned in current schedule.", AutoSize = true, Margin = new Padding(3) }); }
+            currentY += patientsPanel.Height + 10;
+
+
+            return detailPanel;
         }
 
+        // Helper to add a Label-Value row to the detail panel
+        private void AddDetailRow(Panel panel, ref int y, int spacing, int labelX, int valueX, Font labelFont, Font valueFont, Color valueColor, string labelText, string valueText)
+        {
+            // Create Description Label
+            Label lblDesc = new Label
+            {
+                Text = labelText,
+                Font = labelFont,
+                Location = new Point(labelX, y),
+                AutoSize = true
+            };
+            panel.Controls.Add(lblDesc);
+
+            // Calculate position for Value Label based on Description Label
+            valueX = lblDesc.Right + 8; // Start value 8px after the description
+
+            // Create Value Label
+            Label lblValue = new Label
+            {
+                Text = valueText ?? "N/A", // Use N/A for null values
+                Font = valueFont,
+                ForeColor = valueColor,
+                Location = new Point(valueX, y), // Position relative to description
+                // Disable AutoSize, use Anchoring for width instead
+                AutoSize = false,
+                Size = new Size(panel.ClientSize.Width - valueX - labelX, 20), // Initial size, adjust height if needed
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, // Anchor left and right
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            // Adjust height based on content if needed (e.g., for potential wrapping, though less likely now)
+            // lblValue.Height = TextRenderer.MeasureText(lblValue.Text, lblValue.Font, lblValue.ClientSize.Width, TextFormatFlags.WordBreak).Height;
+
+            panel.Controls.Add(lblValue);
+
+            // Increment Y position based on the taller of the two labels for this row
+            y += Math.Max(lblDesc.Height, lblValue.Height) + (spacing / 2);
+        }
+
+        // Creates the panel to display detailed patient information
+        private Panel CreatePatientDetailPanel(Patient patient)
+        {
+            Panel detailPanel = new Panel { Name = "PatientDetailView", BackColor = Color.White, Padding = new Padding(20), AutoScroll = true, BorderStyle = BorderStyle.FixedSingle };
+            int currentY = 10; int labelX = 20; int spacing = 28;
+            Font labelFont = new Font("Segoe UI", 11F); Font valueFont = new Font("Segoe UI", 11F);
+            Color valueColor = ColorTranslator.FromHtml("#2C3E50");
+
+            // Back Button (Goes back to Doctor Detail)
+            Button backButton = new Button { Text = "⬅ Back to Doctor", Font = new Font("Segoe UI", 10F, FontStyle.Bold), Location = new Point(labelX, currentY), Size = new Size(130, 30), FlatStyle = FlatStyle.Flat, BackColor = ColorTranslator.FromHtml("#7F8C8D"), ForeColor = Color.White, Cursor = Cursors.Hand };
+            backButton.FlatAppearance.BorderSize = 0;
+            // We need the ID of the doctor whose detail panel we came from to go back correctly.
+            // For now, just hide this panel and assume the doctor panel is still loaded but hidden.
+            // A better approach might involve passing the doctor ID or using a navigation stack.
+            backButton.Click += (s, e) => {
+                HidePatientDetailPanel();
+                // Re-show doctor panel - requires knowing which doctor was viewed
+                // This simple version just hides patient, assumes doctor panel exists underneath
+                if (doctorDetailPanel != null) doctorDetailPanel.Visible = true; else ShowListView(); // Fallback to list if doctor panel gone
+            };
+            detailPanel.Controls.Add(backButton); currentY += 50;
+
+            // Patient Info
+            AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "ID:", patient.Id.ToString());
+            AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "Name:", patient.Name);
+            AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "Condition:", patient.Condition);
+            AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "Urgency:", patient.Urgency.ToString());
+            AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "Complexity:", patient.ComplexityLevel.ToString());
+            AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "Required Spec:", patient.RequiredSpecialization);
+            AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "Needs Surgery:", patient.NeedsSurgery ? "Yes" : "No");
+            AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "Admission Date:", patient.AdmissionDate.ToString("yyyy-MM-dd HH:mm"));
+
+            // Assignment Info
+            string assignedDocName = patient.AssignedDoctorId.HasValue ? (allDoctors.FirstOrDefault(d => d.Id == patient.AssignedDoctorId.Value)?.Name ?? "Unknown") : "None";
+            AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "Assigned Doctor:", $"{assignedDocName} (ID: {patient.AssignedDoctorId?.ToString() ?? "N/A"})");
+
+            string assignedSurgeonName = patient.AssignedSurgeonId.HasValue ? (allDoctors.FirstOrDefault(d => d.Id == patient.AssignedSurgeonId.Value)?.Name ?? "Unknown") : "None";
+            AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "Assigned Surgeon:", $"{assignedSurgeonName} (ID: {patient.AssignedSurgeonId?.ToString() ?? "N/A"})");
+
+            string orName = patient.AssignedOperatingRoomId.HasValue ? $"OR {patient.AssignedOperatingRoomId.Value}" : "None"; // Assuming OR name isn't easily accessible here
+            AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "Assigned OR:", orName);
+            AddDetailRow(detailPanel, ref currentY, spacing, labelX, labelFont, valueFont, valueColor, "Scheduled Surgery:", patient.ScheduledSurgeryDate?.ToString("yyyy-MM-dd HH:mm") ?? "N/A");
+
+
+            return detailPanel;
+        }
         // --- Event Handlers ---
-
-        // Handles clicks on ANY pagination button ("<", "1", "2", ">", etc.)
         private void PageButton_Click(object sender, EventArgs e)
-        {
-            Button clickedButton = sender as Button;
-            if (clickedButton == null || !clickedButton.Enabled) return; // Ignore disabled buttons
-
-            int newPage = currentPage;
-            string tag = clickedButton.Tag?.ToString();
-
-            if (tag == "Prev")
-            {
-                if (currentPage > 1) newPage--;
-            }
-            else if (tag == "Next")
-            {
-                if (currentPage < totalPages) newPage++;
-            }
-            else if (int.TryParse(tag, out int pageNum))
-            {
-                if (pageNum >= 1 && pageNum <= totalPages)
-                {
-                    newPage = pageNum;
-                }
-            }
-
-            if (newPage != currentPage)
-            {
-                DisplayPage(newPage);
-            }
+        { /* ... Implementation from previous response ... */
+            Button clickedButton = sender as Button; if (clickedButton == null || !clickedButton.Enabled) return;
+            int newPage = currentPage; string tag = clickedButton.Tag?.ToString();
+            if (tag == "Prev") { if (currentPage > 1) newPage--; }
+            else if (tag == "Next") { if (currentPage < totalPages) newPage++; }
+            else if (int.TryParse(tag, out int pageNum)) { if (pageNum >= 1 && pageNum <= totalPages) newPage = pageNum; }
+            if (newPage != currentPage) DisplayPage(newPage);
         }
-
-        // Handles click on the Refresh button
-        private void RefreshButton_Click(object sender, EventArgs e)
-        {
-            RefreshDoctorList();
-        }
-
-        // Placeholder for Edit button click handler
+        private void RefreshButton_Click(object sender, EventArgs e) { RefreshDoctorList(); }
         private void EditButton_Click(object sender, EventArgs e)
-        {
-            Button clickedButton = sender as Button;
-            if (clickedButton?.Tag is int doctorId)
-            {
-                MessageBox.Show($"Edit action triggered for Doctor ID: {doctorId}", "Edit Doctor", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                // TODO: Implement actual edit logic
-                // Example:
-                // using (var editForm = new EditDoctorForm(doctorId)) {
-                //     if (editForm.ShowDialog() == DialogResult.OK) {
-                //         RefreshDoctorList();
-                //     }
-                // }
-            }
+        { /* ... Implementation ... */
+            Button clickedButton = sender as Button; if (clickedButton?.Tag is int doctorId) MessageBox.Show($"Edit action for Doctor ID: {doctorId}", "Edit Doctor");
         }
-
-        // Placeholder for Delete button click handler
         private void DeleteButton_Click(object sender, EventArgs e)
-        {
-            Button clickedButton = sender as Button;
-            if (clickedButton?.Tag is int doctorId)
-            {
-                var confirmResult = MessageBox.Show($"Are you sure you want to delete Doctor ID: {doctorId}?",
-                                                      "Confirm Delete", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
-
-                if (confirmResult == DialogResult.Yes)
-                {
-                    MessageBox.Show($"Delete action confirmed for Doctor ID: {doctorId}", "Delete Doctor", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    // TODO: Implement actual delete logic
-                    // Example:
-                    // bool deleted = db.DeleteDoctor(doctorId); // Assuming method exists
-                    // if (deleted) {
-                    //      DataSingelton.Instance.RemoveDoctor(doctorId); // Update cache if needed
-                    //      RefreshDoctorList(); // Refresh view
-                    // } else {
-                    //      MessageBox.Show("Failed to delete doctor.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    // }
-                }
-            }
+        { /* ... Implementation ... */
+            Button clickedButton = sender as Button; if (clickedButton?.Tag is int doctorId) { var confirmResult = MessageBox.Show($"Delete Doctor ID: {doctorId}?", "Confirm Delete", MessageBoxButtons.YesNo, MessageBoxIcon.Warning); if (confirmResult == DialogResult.Yes) MessageBox.Show($"Delete confirmed for Doctor ID: {doctorId}", "Delete Doctor"); }
         }
-
-        // Placeholder for Add button click handler
         private void AddButton_Click(object sender, EventArgs e)
-        {
-            MessageBox.Show($"Add New Doctor action triggered.", "Add Doctor", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            // TODO: Implement actual Add logic
-            // Example:
-            // using (var addForm = new AddDoctorForm()) {
-            //     if (addForm.ShowDialog() == DialogResult.OK) {
-            //          // Maybe addForm returns the new doctor, update cache?
-            //          RefreshDoctorList(); // Refresh view
-            //     }
-            // }
+        { /* ... Implementation ... */
+            MessageBox.Show($"Add New Doctor action.", "Add Doctor");
         }
 
-
-        // --- UI Initialization using Docking ---
-
+        private void PatientNameLabel_Click(object sender, EventArgs e) { if (sender is Label clickedLabel && clickedLabel.Tag is int patientId) { ShowPatientDetailView(patientId); } }
+        // --- UI Initialization using Docking (Simplified) ---
         private void InitializeComponentDoctors()
         {
-            this.SuspendLayout(); // Suspend layout
+            this.SuspendLayout();
+            this.BackColor = ColorTranslator.FromHtml("#ECF0F1");
 
-            this.BackColor = ColorTranslator.FromHtml("#ECF0F1"); // Light gray background
-
-            // --- Main Content Panel (fills the UserControl) ---
-            contentPanel = new Panel
-            {
-                BackColor = Color.Transparent, // Inherit background or set explicitly
-                Dock = DockStyle.Fill,         // Fill the UserControl
-                Padding = new Padding(20)      // Add padding around the content
-            };
+            contentPanel = new Panel { BackColor = Color.Transparent, Dock = DockStyle.Fill, Padding = new Padding(20) };
             this.Controls.Add(contentPanel);
 
-
-
-            // --- Search and Action Panel (Dock Top, below title) ---
-            searchPanel = new Panel
-            {
-                Height = 50, // Fixed height
-                BackColor = Color.White,
-                // BorderStyle = BorderStyle.FixedSingle, // Optional: Add border
-                Dock = DockStyle.Top, // DOCK TO TOP (below anything already there)
-                Padding = new Padding(10) // Padding inside the search panel
-            };
-            // Add controls to searchPanel BEFORE adding searchPanel to contentPanel
+            searchPanel = new Panel { Height = 50, BackColor = Color.White, Dock = DockStyle.Top, Padding = new Padding(10) };
             InitializeSearchPanelControls(searchPanel);
             contentPanel.Controls.Add(searchPanel);
 
-            Panel tableHeaderPanel = CreateTableHeaderPanel(); // Create the header
-            tableHeaderPanel.Dock = DockStyle.Top;             // Dock it Top
-            contentPanel.Controls.Add(tableHeaderPanel);
+            tableHeaderPanel = CreateTableHeaderPanel(); // Use helper to create
+            tableHeaderPanel.Dock = DockStyle.Top;
+            contentPanel.Controls.Add(tableHeaderPanel); // Add header AFTER search
 
-            // --- Pagination Panel (Dock Bottom) ---
-            paginationPanel = new Panel
-            {
-                Height = 40, // Fixed height
-                BackColor = Color.Transparent, // Transparent background
-                Dock = DockStyle.Bottom, // DOCK TO BOTTOM
-                Padding = new Padding(0, 5, 0, 5) // Vertical padding
-            };
-            // Add controls to paginationPanel BEFORE adding paginationPanel to contentPanel
+            paginationPanel = new Panel { Height = 40, BackColor = Color.Transparent, Dock = DockStyle.Bottom, Padding = new Padding(0, 5, 0, 5) };
             InitializePaginationControls(paginationPanel);
-            paginationPanel.Resize += PaginationPanel_Resize; // Add resize handler for centering
-            contentPanel.Controls.Add(paginationPanel); // Add to contentPanel
+            paginationPanel.Resize += PaginationPanel_Resize;
+            contentPanel.Controls.Add(paginationPanel); // Add pagination
 
+            tablePanel = new Panel { BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle, Dock = DockStyle.Fill, AutoScroll = true };
+            contentPanel.Controls.Add(tablePanel); // Add table panel LAST to fill remaining space
 
-            // --- Table Panel (Dock Fill - takes remaining space) ---
-            tablePanel = new Panel
-            {
-                BackColor = Color.White,
-                BorderStyle = BorderStyle.FixedSingle,
-                Dock = DockStyle.Fill,
-                AutoScroll = true
-            };
+            // Ensure correct Z-order for docked controls
+            tablePanel.BringToFront();
+            paginationPanel.BringToFront();
+            tableHeaderPanel.BringToFront();
+            searchPanel.BringToFront();
 
-
-            // ---Adjust Z - Order(Important!)-- -
-            // Controls added later are generally drawn on top.
-            // Ensure the order of addition reflects the desired layering for docked controls.
-            // Adding searchPanel (Top), then tableHeaderPanel (Top) makes the header appear below search.
-            // Adding paginationPanel (Bottom) reserves space at the bottom.
-            // Adding tablePanel (Fill) takes the space between tableHeaderPanel and paginationPanel.
-            // REMOVED/UNNECESSARY NOW: searchPanel.BringToFront();
-            contentPanel.Controls.Add(tablePanel); // Add to contentPanel
-
-
-
-
-
-
-            this.ResumeLayout(true); // Resume layout and perform layout actions
-                                     // DIAGNOSTICS: Add these lines
-            AddLogMessage($"--- Layout Diagnostics ---");
-            if (searchPanel != null) AddLogMessage($"SearchPanel Bounds: {searchPanel.Bounds}");
-            // Find the header panel in the content panel's controls
-            var header = contentPanel.Controls.OfType<Panel>().FirstOrDefault(p => p.Tag?.ToString() == "TableHeader");
-            if (header != null) AddLogMessage($"TableHeaderPanel Bounds: {header.Bounds}"); else AddLogMessage("TableHeaderPanel NOT FOUND in contentPanel!");
-            if (tablePanel != null) AddLogMessage($"TablePanel (Rows) Bounds: {tablePanel.Bounds}");
-            if (paginationPanel != null) AddLogMessage($"PaginationPanel Bounds: {paginationPanel.Bounds}");
-            AddLogMessage($"ContentPanel ClientRectangle: {contentPanel.ClientRectangle}");
-            AddLogMessage($"--- End Diagnostics ---");
+            this.ResumeLayout(true);
         }
 
-        private Panel CreateTableHeaderPanel() // Renamed for clarity
+        // Creates the header panel (adjust columns as needed)
+        private Panel CreateTableHeaderPanel()
         {
-            Panel tableHeaderPanel = new Panel
-            {
-                Height = 40,
-                BackColor = ColorTranslator.FromHtml("#F8F9FA"), // Very light gray
-                                                                 // Dock is set where it's added now
-                Padding = new Padding(20, 0, 20, 0),
-                Tag = "TableHeader" // Horizontal padding
-            };
-            // Removed: parentTablePanel.Controls.Add(tableHeaderPanel);
-
-            // Define column headers
-            string[] columnHeaders = { "Name", "spescilzation", "workload", "Actions" };
-            int[] columnStartX = { tableHeaderPanel.Padding.Left,                // Name starts at left padding (Index 0)
-                 tableHeaderPanel.Padding.Left + 220,          // Specialty starts after Name column space (Index 1)
-                 tableHeaderPanel.Padding.Left + 220 + 220,    // Patients starts after Specialty column space (Index 2)
-                 tableHeaderPanel.Padding.Left + 220 + 220 + 170  };
-
-            if (columnStartX.Length != columnHeaders.Length)
-            {
-                AddLogMessage($"CRITICAL ERROR: Mismatch between columnHeaders ({columnHeaders.Length}) and columnStartX ({columnStartX.Length}) array lengths in CreateTableHeaderPanel.");
-                // Maybe return null or an empty panel in case of error
-                return tableHeaderPanel; // Or handle error differently
-            }
+            Panel header = new Panel { Height = 40, BackColor = ColorTranslator.FromHtml("#F8F9FA"), Dock = DockStyle.Top, Padding = new Padding(20, 0, 20, 0), Tag = "TableHeader" };
+            string[] columnHeaders = { "Name", "Specialization", "Workload", "Actions" };
+            int[] columnStartX = { header.Padding.Left, header.Padding.Left + 220, header.Padding.Left + 440, header.Width - header.Padding.Right - 100 }; // Example positions
 
             for (int i = 0; i < columnHeaders.Length; i++)
             {
-                Label headerLabel = new Label
+                Label lbl = new Label
                 {
                     Text = columnHeaders[i],
                     ForeColor = ColorTranslator.FromHtml("#2C3E50"),
                     Font = new Font("Segoe UI", 11, FontStyle.Bold),
-                    Location = new Point(columnStartX[i], (tableHeaderPanel.ClientSize.Height - 18) / 2), // Vertical center
+                    Location = new Point(columnStartX[i], (header.ClientSize.Height - 18) / 2),
                     AutoSize = true
                 };
+                if (columnHeaders[i] == "Actions") lbl.Anchor = AnchorStyles.Top | AnchorStyles.Right; else lbl.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+                // Adjust X for Actions label based on actual panel width (might need resize event)
+                if (columnHeaders[i] == "Actions") lbl.Left = header.ClientSize.Width - header.Padding.Right - lbl.Width - 60; // Approx position actions buttons
 
-                if (columnHeaders[i] == "Actions")
-                {
-                    int approxActionButtonsWidth = 100;
-                    // Use ClientSize cautiously here as panel might not be sized yet, but Anchoring helps
-                    headerLabel.Location = new Point(tableHeaderPanel.Width - tableHeaderPanel.Padding.Right - approxActionButtonsWidth, headerLabel.Top); // Position from Right might need Width adjustment later
-                    headerLabel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-                }
-                else
-                {
-                    headerLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left;
-                }
-                tableHeaderPanel.Controls.Add(headerLabel);
+                header.Controls.Add(lbl);
             }
-            return tableHeaderPanel; // Return the created panel
+            return header;
         }
 
-        // Helper to setup controls within the search panel
+        // --- (Keep other helper methods: InitializeSearchPanelControls, InitializePaginationControls, UpdatePaginationButtons, CenterPaginationButtons, PaginationPanel_Resize, CreateActionButton, AddLogMessage) ---
         private void InitializeSearchPanelControls(Panel parent)
-        {
-            // Controls inside Search Panel (positioned relative to parent's padding)
-            TextBox searchBox = new TextBox
-            {
-                Location = new Point(parent.Padding.Left, (parent.ClientSize.Height - 25) / 2), // Vertically center
-                Size = new Size(250, 25),
-                Font = new Font("Segoe UI", 11),
-                Text = "Search doctors...",
-                ForeColor = Color.Gray,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left // Anchor left
-            };
-            // Placeholder text logic for searchBox
-            searchBox.Enter += (s, e) => { if (searchBox.Text == "Search doctors...") { searchBox.Text = ""; searchBox.ForeColor = Color.Black; } };
-            searchBox.Leave += (s, e) => { if (string.IsNullOrWhiteSpace(searchBox.Text)) { searchBox.Text = "Search doctors..."; searchBox.ForeColor = Color.Gray; } };
-
-
-
-            // Buttons anchored to the right
-            Button refreshButton = new Button // Create Refresh Button
-            {
-                Size = new Size(90, 28),
-                Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                Text = "Refresh",
-                FlatStyle = FlatStyle.Flat,
-                BackColor = ColorTranslator.FromHtml("#2ECC71"), // Green
-                ForeColor = Color.White,
-                Cursor = Cursors.Hand,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right // Anchor right
-            };
-            refreshButton.FlatAppearance.BorderSize = 0;
-            refreshButton.Click += RefreshButton_Click;
-            // Position from right edge
-            refreshButton.Location = new Point(parent.ClientSize.Width - parent.Padding.Right - refreshButton.Width, (parent.ClientSize.Height - refreshButton.Height) / 2);
-
-
-            Button addButton = new Button // Create Add Button
-            {
-                Size = new Size(140, 28),
-                Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                Text = "Add New Doctor",
-                FlatStyle = FlatStyle.Flat,
-                BackColor = ColorTranslator.FromHtml("#3498DB"), // Blue
-                ForeColor = Color.White,
-                Cursor = Cursors.Hand,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right // Anchor right
-            };
-            addButton.FlatAppearance.BorderSize = 0;
-            addButton.Click += AddButton_Click; // Add handler
-                                                // Position left of refresh button
-            addButton.Location = new Point(refreshButton.Left - 10 - addButton.Width, refreshButton.Top);
-
-
-            parent.Controls.Add(searchBox);
-
-            parent.Controls.Add(addButton);   // Add before refresh if positioning left-of
-            parent.Controls.Add(refreshButton);
-
+        { /* ... Implementation ... */
+            TextBox searchBox = new TextBox { Location = new Point(parent.Padding.Left, (parent.ClientSize.Height - 25) / 2), Size = new Size(250, 25), Font = new Font("Segoe UI", 11), Text = "Search doctors...", ForeColor = Color.Gray, Anchor = AnchorStyles.Top | AnchorStyles.Left };
+            searchBox.Enter += (s, e) => { if (searchBox.Text == "Search doctors...") { searchBox.Text = ""; searchBox.ForeColor = Color.Black; } }; searchBox.Leave += (s, e) => { if (string.IsNullOrWhiteSpace(searchBox.Text)) { searchBox.Text = "Search doctors..."; searchBox.ForeColor = Color.Gray; } };
+            Button refreshButton = new Button { Size = new Size(90, 28), Font = new Font("Segoe UI", 10, FontStyle.Bold), Text = "Refresh", FlatStyle = FlatStyle.Flat, BackColor = ColorTranslator.FromHtml("#2ECC71"), ForeColor = Color.White, Cursor = Cursors.Hand, Anchor = AnchorStyles.Top | AnchorStyles.Right }; refreshButton.FlatAppearance.BorderSize = 0; refreshButton.Click += RefreshButton_Click; refreshButton.Location = new Point(parent.ClientSize.Width - parent.Padding.Right - refreshButton.Width, (parent.ClientSize.Height - refreshButton.Height) / 2);
+            Button addButton = new Button { Size = new Size(140, 28), Font = new Font("Segoe UI", 10, FontStyle.Bold), Text = "Add New Doctor", FlatStyle = FlatStyle.Flat, BackColor = ColorTranslator.FromHtml("#3498DB"), ForeColor = Color.White, Cursor = Cursors.Hand, Anchor = AnchorStyles.Top | AnchorStyles.Right }; addButton.FlatAppearance.BorderSize = 0; addButton.Click += AddButton_Click; addButton.Location = new Point(refreshButton.Left - 10 - addButton.Width, refreshButton.Top);
+            parent.Controls.Add(searchBox); parent.Controls.Add(addButton); parent.Controls.Add(refreshButton);
         }
-
-        // Helper to setup controls within the pagination panel
         private void InitializePaginationControls(Panel parent)
-        {
-            int buttonWidth = 40;
-            int buttonHeight = 30;
-            // We create a fixed number of buttons initially, UpdatePaginationButtons will manage visibility/text
-            int maxTotalButtons = (DataSingelton.Instance.Doctors.Count) / 10 + 2; // e.g., Prev + 5 numbers + Next
-
-            // Create Prev Button
-            Button prevButton = new Button
+        { /* ... Implementation ... */
+            int buttonWidth = 30; int buttonHeight = 30; int maxNumericButtons = 5;
+            Button prevButton = new Button { Text = "◀", Tag = "Prev", Size = new Size(buttonWidth, buttonHeight), FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 11), BackColor = Color.White, ForeColor = ColorTranslator.FromHtml("#7F8C8D"), Cursor = Cursors.Hand }; prevButton.FlatAppearance.BorderSize = 0; prevButton.Click += PageButton_Click; parent.Controls.Add(prevButton);
+            for (int i = 1; i <= maxNumericButtons; i++) { Button pageButton = new Button { Text = i.ToString(), Tag = i, Size = new Size(buttonWidth, buttonHeight), FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 11), BackColor = Color.White, ForeColor = ColorTranslator.FromHtml("#7F8C8D"), Cursor = Cursors.Hand, Visible = false }; pageButton.FlatAppearance.BorderSize = 0; pageButton.Click += PageButton_Click; parent.Controls.Add(pageButton); }
+            Button nextButton = new Button { Text = "▶", Tag = "Next", Size = new Size(buttonWidth, buttonHeight), FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 11), BackColor = Color.White, ForeColor = ColorTranslator.FromHtml("#7F8C8D"), Cursor = Cursors.Hand }; nextButton.FlatAppearance.BorderSize = 0; nextButton.Click += PageButton_Click; parent.Controls.Add(nextButton);
+            CenterPaginationButtons(); // Initial attempt
+        }
+        private void UpdatePaginationButtons()
+        { /* ... Implementation from previous response ... */
+            if (paginationPanel == null) return;
+            int maxNumericButtons = 5; int startPage = Math.Max(1, currentPage - (maxNumericButtons / 2)); int endPage = Math.Min(totalPages, startPage + maxNumericButtons - 1); if (endPage - startPage + 1 < maxNumericButtons) { startPage = Math.Max(1, endPage - maxNumericButtons + 1); }
+            int currentNumericButtonIndex = 0;
+            foreach (Control ctrl in paginationPanel.Controls)
             {
-                Text = "◀",
-                Tag = "Prev",
-                Size = new Size(buttonWidth, buttonHeight),
-                // Style properties... (same as numeric)
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 11),
-                BackColor = Color.White,
-                ForeColor = ColorTranslator.FromHtml("#7F8C8D"),
-                Cursor = Cursors.Hand
-            };
-            prevButton.FlatAppearance.BorderSize = 0;
-            prevButton.Click += PageButton_Click;
-            parent.Controls.Add(prevButton);
-
-
-            // Create placeholder numeric buttons (max 5 in this example)
-            for (int i = 1; i <= maxTotalButtons - 2; i++)
-            {
-                Button pageButton = new Button
+                if (ctrl is Button pageButton)
                 {
-                    Text = i.ToString(), // Initial text
-                    Tag = i,             // Store page number in Tag
-                    Size = new Size(buttonWidth, buttonHeight),
-                    FlatStyle = FlatStyle.Flat,
-                    Font = new Font("Segoe UI", 11),
-                    BackColor = Color.White,
-                    ForeColor = ColorTranslator.FromHtml("#7F8C8D"),
-                    Cursor = Cursors.Hand,
-                    Visible = false // Initially hidden, UpdatePaginationButtons shows relevant ones
-                };
-                pageButton.FlatAppearance.BorderSize = 0;
-                pageButton.Click += PageButton_Click;
-                parent.Controls.Add(pageButton);
+                    pageButton.Enabled = true; pageButton.Visible = true; pageButton.ForeColor = ColorTranslator.FromHtml("#7F8C8D"); pageButton.BackColor = Color.White; pageButton.Font = new Font("Segoe UI", 11);
+                    bool isPrevNext = pageButton.Tag?.ToString() == "Prev" || pageButton.Tag?.ToString() == "Next";
+                    bool isNumeric = int.TryParse(pageButton.Tag?.ToString(), out int pageNumTag);
+                    if (isPrevNext)
+                    {
+                        if (pageButton.Tag.ToString() == "Prev") { pageButton.Enabled = currentPage > 1; pageButton.ForeColor = pageButton.Enabled ? ColorTranslator.FromHtml("#3498DB") : Color.LightGray; }
+                        else { pageButton.Enabled = currentPage < totalPages; pageButton.ForeColor = pageButton.Enabled ? ColorTranslator.FromHtml("#3498DB") : Color.LightGray; }
+                        if (totalPages <= 1) { pageButton.Enabled = false; pageButton.ForeColor = Color.LightGray; }
+                    }
+                    else if (isNumeric)
+                    {
+                        int actualPageNum = startPage + currentNumericButtonIndex;
+                        if (actualPageNum <= endPage && actualPageNum <= totalPages)
+                        {
+                            pageButton.Text = actualPageNum.ToString(); pageButton.Tag = actualPageNum; // Update tag too
+                            pageButton.Visible = true; pageButton.Enabled = true;
+                            if (actualPageNum == currentPage) { pageButton.ForeColor = Color.White; pageButton.BackColor = ColorTranslator.FromHtml("#3498DB"); pageButton.Font = new Font("Segoe UI", 11, FontStyle.Bold); }
+                            currentNumericButtonIndex++;
+                        }
+                        else { pageButton.Visible = false; pageButton.Enabled = false; }
+                    }
+                }
             }
-
-            // Create Next Button
-            Button nextButton = new Button
-            {
-                Text = "▶",
-                Tag = "Next",
-                Size = new Size(buttonWidth, buttonHeight),
-                // Style properties...
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 11),
-                BackColor = Color.White,
-                ForeColor = ColorTranslator.FromHtml("#7F8C8D"),
-                Cursor = Cursors.Hand
-            };
-            nextButton.FlatAppearance.BorderSize = 0;
-            nextButton.Click += PageButton_Click;
-            parent.Controls.Add(nextButton);
-
-
-            // Initial centering - might be slightly off until first resize/update
             CenterPaginationButtons();
         }
+        private void CenterPaginationButtons()
+        { /* ... Implementation from previous response ... */
+            if (paginationPanel == null || !paginationPanel.IsHandleCreated || paginationPanel.ClientSize.Width <= 0) return;
+            var visibleButtons = paginationPanel.Controls.OfType<Button>().Where(b => b.Visible).OrderBy(b => b.Left).ToList(); // Order by current position to maintain relative order
+            if (!visibleButtons.Any()) return;
+            int totalButtonWidth = visibleButtons.Sum(b => b.Width) + Math.Max(0, visibleButtons.Count - 1) * 5; // Use actual widths + 5px spacing
+            int startX = Math.Max(0, (paginationPanel.ClientSize.Width - totalButtonWidth) / 2);
+            int currentX = startX; int buttonY = (paginationPanel.ClientSize.Height - visibleButtons.First().Height) / 2;
+            foreach (var button in visibleButtons) { button.Location = new Point(currentX, buttonY); currentX += button.Width + 5; }
+        }
+        private void PaginationPanel_Resize(object sender, EventArgs e) { CenterPaginationButtons(); }
 
+        private void AddDetailTextBox(Panel panel, ref int y, int spacing, int labelX, Font labelFont, string labelText, string valueText, int height = 80) { /* ... Implementation ... */ Label lblDesc = new Label { Text = labelText, Font = labelFont, Location = new Point(labelX, y), AutoSize = true }; panel.Controls.Add(lblDesc); y += lblDesc.Height + 2; TextBox textBox = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Location = new Point(labelX + 5, y), Size = new Size(panel.ClientSize.Width - labelX * 2 - 10, height), Font = new Font("Segoe UI", 9F), BackColor = ColorTranslator.FromHtml("#F8F9FA"), BorderStyle = BorderStyle.FixedSingle, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, Text = valueText ?? "" }; panel.Controls.Add(textBox); y += textBox.Height + 10; }
+        private Button CreateActionButton(string text, string htmlColor, int x, int y)
+        { /* ... Implementation ... */
+            Button button = new Button { Text = text, Location = new Point(x, y), Size = new Size(28, 28), FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10, FontStyle.Bold), ForeColor = ColorTranslator.FromHtml(htmlColor), BackColor = ControlPaint.LightLight(ColorTranslator.FromHtml(htmlColor)), Cursor = Cursors.Hand, TextAlign = ContentAlignment.MiddleCenter, Padding = new Padding(0) }; button.FlatAppearance.BorderSize = 0; return button;
+        }
+        private void AddLogMessage(string message) { Console.WriteLine($"[DoctorsForm] {DateTime.Now:HH:mm:ss}: {message}"); }
 
-
-
-
-        // --- Utility / Other Methods ---
-
-        // Optional logging method
-        private void AddLogMessage(string message)
-        {
-            Console.WriteLine($"[DoctorsForm] {DateTime.Now:HH:mm:ss}: {message}");
-            // Update status bar etc. here if needed (using Invoke if necessary)
+        private void AddDetailRow(Panel panel, ref int y, int spacing, int labelX, Font labelFont, Font valueFont, Color valueColor, string labelText, string valueText)
+        { /* ... Implementation from previous response ... */
+            Label lblDesc = new Label { Text = labelText, Font = labelFont, Location = new Point(labelX, y), AutoSize = true }; panel.Controls.Add(lblDesc);
+            int valueX = lblDesc.Right + 8;
+            Label lblValue = new Label { Text = valueText ?? "N/A", Font = valueFont, ForeColor = valueColor, Location = new Point(valueX, y), AutoSize = false, Size = new Size(panel.ClientSize.Width - valueX - labelX, 20), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, TextAlign = ContentAlignment.MiddleLeft };
+            // Optional: Adjust height for wrapping if needed
+            // int preferredHeight = TextRenderer.MeasureText(lblValue.Text, lblValue.Font, lblValue.Width, TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl).Height;
+            // lblValue.Height = Math.Max(20, preferredHeight);
+            panel.Controls.Add(lblValue);
+            y += Math.Max(lblDesc.Height, lblValue.Height) + (spacing / 2);
         }
 
-        // Included 'start' method from original code if needed elsewhere
-        public async void start()
-        {
-            try
-            {
-                s = new SchedulerOrchestrator(); // Assumes this class exists
-                main = await s.GenerateOptimalSchedule(); // Assumes this method exists
-                schedulesForm = new SchedulesForm(main); // Assumes this class exists
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error during 'start' execution: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+        private string FormatPreferences(List<DoctorPreference> preferences)
+        { /* Helper to format preferences nicely */
+            if (preferences == null || !preferences.Any()) return "None";
+            StringBuilder sb = new StringBuilder();
+            foreach (var p in preferences) sb.AppendLine($"- {p.Direction} {p.Type}" + (p.LevelValue.HasValue ? $" (Level: {(int)p.LevelValue})" : "") + (string.IsNullOrEmpty(p.ConditionValue) ? "" : $" (Condition: {p.ConditionValue})"));
+            return sb.ToString();
         }
-
+        private string FormatAvailability(List<AvailabilitySlot> slots)
+        { /* Helper to format availability nicely */
+            if (slots == null || !slots.Any()) return "None defined";
+            StringBuilder sb = new StringBuilder();
+            foreach (var s in slots.OrderBy(slot => slot.DayOfWeek).ThenBy(slot => slot.StartTime)) sb.AppendLine($"- {s.DayOfWeek}: {s.StartTime:hh\\:mm} - {s.EndTime:hh\\:mm}");
+            return sb.ToString();
+        }
     } // End of DoctorsForm class
-
-    // Partial class modifier allows InitializeComponent if using WinForms Designer alongside code
-    // If purely code-generated, 'partial' isn't strictly required but doesn't hurt.
-    // public partial class DoctorsForm { } // No InitializeComponent method needed if not using Designer
 
 } // End of namespace

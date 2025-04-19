@@ -7,6 +7,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using DB;
+
 // using DB; // Assuming DataSingelton is accessible or using DataManager
 using Models;
 
@@ -240,10 +242,10 @@ namespace MedScheduler.forms
         private void SetupInitialValues()
         {
             // Reset parameters to defaults shown in textboxes
-            populationSizeTextBox.Text = "100";
-            maxGenerationsTextBox.Text = "50";
+            populationSizeTextBox.Text = "400";
+            maxGenerationsTextBox.Text = "500";
             crossoverRateTextBox.Text = "0.85";
-            mutationRateTextBox.Text = "0.35";
+            mutationRateTextBox.Text = "0.1";
             specializationMatchTextBox.Text = "6.0";
             workloadBalanceTextBox.Text = "5.5";
             urgencyPriorityTextBox.Text = "4.5";
@@ -288,8 +290,10 @@ namespace MedScheduler.forms
                     finalStats = orchestrator.finalStatistics;
                     AddLogMessage($"Scheduling completed successfully in {finalStats.TotalElapsedTimeSeconds:F2} seconds.");
                     AddLogMessage($"GA ran for {finalStats.GaGenerations} generations. Final Fitness: {finalStats.GaFinalFitness:F2}");
+                   
                     UpdateResultsUI(finalStats);
                     UpdateStatusToCompleted();
+
                 }
                 else if (algorithmTask.IsCanceled)
                 {

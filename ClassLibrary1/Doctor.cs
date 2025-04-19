@@ -13,6 +13,7 @@ namespace Models
         public int MaxWorkload { get; set; } // Maximum number of patients the doctor can handle
         public ExperienceLevel ExperienceLevel { get; set; } // Using Enum
 
+        public List<int> patientsIDS { get; set; }
         public List<DoctorPreference> Preferences { get; set; } = new List<DoctorPreference>();
         public List<int> PreviousPatients { get; set; } = new List<int>(); // IDs of patients previously treated
 
@@ -29,6 +30,10 @@ namespace Models
             return Specialization == patient.RequiredSpecialization &&
                    CanAcceptPatient() &&
                    (ExperienceLevel >= GetRequiredExperienceLevel(patient.Urgency));
+        }
+        public void SetCurrentWorkLoad()
+        {
+            Workload = patientsIDS.Count;
         }
 
         // Helper to determine required experience based on patient urgency
